@@ -10,7 +10,7 @@
 <tr>
 <td width="120"><img src="http://pollen.club/wp-content/uploads/2017/07/logo2.png" width="80" alt="Pollen Club Logo"></td>
 <td>
-<b>Заказчик:</b> <a href="https://p.su/">П</a> — .
+<b>Заказчик:</b> <a href="https://pgpi.su/">ПГПИ</a> — .
 </td>
 </tr>
 </table>
