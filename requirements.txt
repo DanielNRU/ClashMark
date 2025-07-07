@@ -1,0 +1,12 @@
+flask
+werkzeug
+pandas
+torch
+torchvision
+Pillow
+lxml
+pyyaml
+scikit-learn
+seaborn
+matplotlib
+requests 
