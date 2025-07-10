@@ -152,12 +152,17 @@ def export_to_xml(df, output_path, original_xml_path=None):
             # Status
             status = ET.SubElement(clash, 'Status')
             pred = row.get('cv_prediction')
+            pred_source = row.get('prediction_source', '')
             if pred == 1:
                 status.text = 'Активн.'
             elif pred == 0:
-                status.text = 'Подтвержд.'
-            else:
+                status.text = 'Подтверждено'
+            elif pred == -1 and pred_source == 'manual_review':
+                status.text = 'Проанализировано'
+            elif pred == -1 and pred_source == 'algorithm':
                 status.text = 'Требует проверки'
+            else:
+                status.text = 'Новый'
             
             # Confidence
             confidence = ET.SubElement(clash, 'Confidence')
@@ -210,12 +215,18 @@ def export_to_bimstep_xml(df, output_xml_path, original_xml_path=None):
             
             # Status - правильное сопоставление
             status = ET.SubElement(clash, 'status')
-            if row.get('cv_prediction') == 1:
+            pred = row.get('cv_prediction')
+            pred_source = row.get('prediction_source', '')
+            if pred == 1:
                 status.text = 'Active'  # cannot -> active
-            elif row.get('cv_prediction') == 0:
+            elif pred == 0:
                 status.text = 'Approved'  # can -> approved
+            elif pred == -1 and pred_source == 'manual_review':
+                status.text = 'Reviewed'  # visual -> reviewed (ручная разметка)
+            elif pred == -1 and pred_source == 'algorithm':
+                status.text = 'Reviewed'  # visual -> reviewed (алгоритм)
             else:
-                status.text = 'Reviewed'  # visual -> reviewed
+                status.text = 'New'  # всё остальное
             
             # NameFile
             name_file = ET.SubElement(clash, 'nameFile')
