@@ -641,13 +641,51 @@ def download_file(session_id, filename):
         session_dir = session_dirs.get(session_id)
         if not session_dir or not os.path.exists(session_dir):
             return "Файл не найден", 404
-        
         file_path = os.path.join(session_dir, filename)
+        # --- Новый блок: если это XML/BIMStep, применяем ручную разметку ---
+        if filename.endswith('.xml') and os.path.exists(file_path):
+            # Проверяем наличие manual_review.json
+            review_path = os.path.join(session_dir, 'manual_review.json')
+            if os.path.exists(review_path):
+                import json
+                with open(review_path, 'r', encoding='utf-8') as f:
+                    reviews = json.load(f)
+                # Загружаем DataFrame из исходного файла (ищем по source_file)
+                from core.xml_utils import parse_xml_data, export_to_xml, export_to_bimstep_xml
+                # Определяем исходный XML (по имени)
+                orig_xml = None
+                for f in os.listdir(session_dir):
+                    if f.endswith('.xml') and not f.startswith(('cv_results_', 'bimstep_results_', 'JournalBimStep')):
+                        orig_xml = os.path.join(session_dir, f)
+                        break
+                if orig_xml:
+                    # Определяем формат экспорта
+                    settings = load_settings()
+                    export_format = settings.get('export_format', 'standard')
+                    df = parse_xml_data(orig_xml, export_format)
+                    # Применяем ручную разметку
+                    review_map = {r['clash_id']: r['status'] for r in reviews}
+                    for idx, row in df.iterrows():
+                        cid = row.get('clash_id')
+                        if cid in review_map:
+                            status = review_map[cid]
+                            if status == 'Approved':
+                                df.at[idx, 'cv_prediction'] = 0
+                                df.at[idx, 'prediction_source'] = 'manual_review'
+                            elif status == 'Active':
+                                df.at[idx, 'cv_prediction'] = 1
+                                df.at[idx, 'prediction_source'] = 'manual_review'
+                            else:
+                                df.at[idx, 'cv_prediction'] = -1
+                                df.at[idx, 'prediction_source'] = 'manual_review'
+                    # Переэкспортируем файл
+                    if filename.startswith('bimstep_results_'):
+                        export_to_bimstep_xml(df, file_path, orig_xml)
+                    else:
+                        export_to_xml(df, file_path, orig_xml)
         if not os.path.exists(file_path):
             return "Файл не найден", 404
-        
         return send_file(file_path, as_attachment=True, download_name=filename)
-        
     except Exception as e:
         logger.error(f"Ошибка скачивания файла: {e}")
         return "Ошибка скачивания", 500
