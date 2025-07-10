@@ -615,6 +615,26 @@ def train_preview():
     except Exception as e:
         return jsonify({'error': f'Ошибка анализа файлов: {e}'}), 500
 
+@app.route('/api/manual_review', methods=['POST'])
+def api_manual_review():
+    try:
+        data = request.get_json()
+        session_id = data.get('session_id')
+        reviews = data.get('reviews', [])
+        if not session_id or not reviews:
+            return jsonify({'error': 'Нет session_id или разметок'}), 400
+        session_dir = session_dirs.get(session_id)
+        if not session_dir or not os.path.exists(session_dir):
+            return jsonify({'error': 'Сессия не найдена'}), 404
+        # Сохраняем разметку в файл
+        review_path = os.path.join(session_dir, 'manual_review.json')
+        import json
+        with open(review_path, 'w', encoding='utf-8') as f:
+            json.dump(reviews, f, ensure_ascii=False, indent=2)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/download/<session_id>/<filename>')
 def download_file(session_id, filename):
     try:
