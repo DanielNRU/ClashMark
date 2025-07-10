@@ -332,6 +332,24 @@ if (searchInput) {
 
 // Логика разметки visual/Reviewed реализована на backend, frontend только отображает результат
 
+// --- Загрузка настроек при загрузке страницы для analysisInfo ---
+function updateAnalysisInfoFromSettings(settings) {
+    const analysisInfo = document.getElementById('analysisInfo');
+    if (!analysisInfo) return;
+    let mode = settings.inference_mode === 'model' ? 'модель' : 'алгоритм';
+    let manual = settings.manual_review_enabled ? 'с ручной разметкой' : 'без ручной разметки';
+    let format = settings.export_format === 'bimstep' ? 'BIM Step' : 'стандартный';
+    let model = settings.model_file || '';
+    analysisInfo.textContent = `В режиме ${mode} ${manual}. Формат экспорта: ${format}${mode === 'модель' ? `, модель: ${model}` : ''}`;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    fetch('/api/settings').then(r => r.json()).then(settings => {
+        updateAnalysisInfoFromSettings(settings);
+    });
+    // ... существующий код ...
+});
+
 document.getElementById('analyzeForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     
@@ -348,29 +366,7 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
     results.style.display = 'none';
     errorContainer.style.display = 'none';
 
-    // --- Новый блок: выводим настройки анализа сразу ---
-    if (analysisInfo) {
-        // Пробуем взять значения из формы (если есть соответствующие input/select)
-        let mode = 'алгоритм';
-        let manual = 'без ручной разметки';
-        let format = 'стандартный';
-        let model = '';
-        try {
-            const settingsForm = document.getElementById('settingsForm');
-            if (settingsForm) {
-                const infMode = settingsForm.querySelector('select[name="inference_mode"]');
-                if (infMode) mode = infMode.value === 'model' ? 'модель' : 'алгоритм';
-                const manualCheck = settingsForm.querySelector('input[name="manual_review_enabled"]');
-                if (manualCheck) manual = manualCheck.checked ? 'с ручной разметкой' : 'без ручной разметки';
-                const expFormat = settingsForm.querySelector('select[name="export_format"]');
-                if (expFormat) format = expFormat.value === 'bimstep' ? 'BIM Step' : 'стандартный';
-                const modelSel = settingsForm.querySelector('select[name="model_file"]');
-                if (modelSel) model = modelSel.value;
-            }
-        } catch (e) {}
-        analysisInfo.textContent = `В режиме ${mode} ${manual}. Формат экспорта: ${format}${mode === 'модель' ? `, модель: ${model}` : ''}`;
-    }
-
+    // analysisInfo обновляется из настроек до анализа не требуется, т.к. уже обновлено при загрузке
     try {
         const response = await fetch('/analyze', {
             method: 'POST',
@@ -379,13 +375,7 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
         const data = await response.json();
         // --- Новый блок: отображаем настройки анализа ---
         if (data.analysis_settings && analysisInfo) {
-            let mode = data.analysis_settings.inference_mode === 'model' ? 'модель' : 'алгоритм';
-            let manual = data.analysis_settings.manual_review_enabled ? 'с ручной разметкой' : 'без ручной разметки';
-            let format = data.analysis_settings.export_format === 'bimstep' ? 'BIM Step' : 'стандартный';
-            let model = data.analysis_settings.model_file || '';
-            analysisInfo.textContent = `В режиме ${mode} ${manual}. Формат экспорта: ${format}${mode === 'модель' ? `, модель: ${model}` : ''}`;
-        } else if (analysisInfo) {
-            analysisInfo.textContent = '';
+            updateAnalysisInfoFromSettings(data.analysis_settings);
         }
         if (data.error) {
             errorContainer.innerHTML = `<span class="icon">⚠️</span> ${data.error}`;

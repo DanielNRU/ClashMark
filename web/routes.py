@@ -159,6 +159,11 @@ def settings():
     
     return render_template('settings.html', settings=settings, model_files=model_files, model_metrics=model_metrics)
 
+@app.route('/api/settings', methods=['GET'])
+def api_settings():
+    settings = load_settings()
+    return jsonify(settings)
+
 @app.route('/analyze', methods=['POST'])
 def analyze_files():
     try:
