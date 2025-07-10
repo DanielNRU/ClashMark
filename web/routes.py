@@ -13,7 +13,7 @@ import uuid
 from core.xml_utils import (
     load_all_category_pairs, get_pair, parse_xml_data, export_to_bimstep_xml, export_to_xml, add_bimstep_journal_entry
 )
-from core.image_utils import find_image_by_name
+from core.image_utils import find_image_by_name, get_relative_image_path
 from ml.model import create_model
 from ml.dataset import CollisionImageDataset, create_transforms
 from ml.inference import predict, fill_xml_fields
@@ -62,8 +62,9 @@ def collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_fo
             if need_images:
                 for idx, row in df_file.iterrows():
                     image_href = row.get('image_href', '')
-                    image_path = find_image_by_relative_path(image_href, session_dir)
-                    if not image_path:
+                    rel_path = get_relative_image_path(image_href)
+                    image_path = os.path.join(session_dir, rel_path) if rel_path else ''
+                    if not image_path or not os.path.exists(image_path):
                         # fallback
                         image_name = os.path.basename(image_href)
                         image_path = find_image_by_name(image_name, session_dir)
@@ -163,21 +164,24 @@ def analyze_files():
     try:
         xml_files = request.files.getlist('xml_file')
         zip_files = request.files.getlist('images_zip')
-        
-        if not xml_files:
-            return jsonify({'error': 'Не выбраны XML файлы!'})
-        
-        # Загружаем настройки
+        # Загружаем настройки заранее
         settings = load_settings()
         export_format = settings.get('export_format', 'standard')
         inference_mode = settings.get('inference_mode', 'model')
         low_confidence = settings.get('low_confidence', 0.3)
         high_confidence = settings.get('high_confidence', 0.7)
         manual_review_enabled = settings.get('manual_review_enabled', False)
-        
+        analysis_settings = {
+            'inference_mode': inference_mode,
+            'manual_review_enabled': manual_review_enabled,
+            'export_format': export_format,
+            'model_file': settings.get('model_file', 'model_clashmark.pt')
+        }
+        if not xml_files:
+            return jsonify({'error': 'Не выбраны XML файлы!', 'analysis_settings': analysis_settings})
         # Для стандартного формата требуем ZIP архивы, для BIM Step - не обязательно
         if export_format == 'standard' and not zip_files:
-            return jsonify({'error': 'Для стандартного формата необходимо загрузить ZIP архивы с изображениями!'})
+            return jsonify({'error': 'Для стандартного формата необходимо загрузить ZIP архивы с изображениями!', 'analysis_settings': analysis_settings})
         
         # Создаем временную папку для сессии
         session_dir = tempfile.mkdtemp(prefix='analysis_session_')
@@ -218,7 +222,7 @@ def analyze_files():
         df = collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format=export_format)
         
         if df.empty:
-            return jsonify({'error': 'Не удалось обработать XML файлы!'})
+            return jsonify({'error': 'Не удалось обработать XML файлы!', 'analysis_settings': analysis_settings})
         
         # Загружаем категории пар
         pairs = load_all_category_pairs('category_pairs.yaml')
@@ -420,13 +424,6 @@ def analyze_files():
             'total_approved': sum(f['approved_count'] for f in stats_per_file),
             'total_active': sum(f['active_count'] for f in stats_per_file),
             'total_reviewed': sum(f['reviewed_count'] for f in stats_per_file)
-        }
-        # Добавляем инфо о настройках
-        analysis_settings = {
-            'inference_mode': inference_mode,
-            'manual_review_enabled': manual_review_enabled,
-            'export_format': export_format,
-            'model_file': settings.get('model_file', 'model_clashmark.pt')
         }
         return jsonify(to_py({
             'success': True,
