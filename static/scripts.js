@@ -349,15 +349,7 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
 
     // --- Новый блок: выводим настройки анализа ---
     let analysisInfo = document.getElementById('analysisInfo');
-    if (!analysisInfo) {
-        analysisInfo = document.createElement('div');
-        analysisInfo.id = 'analysisInfo';
-        analysisInfo.style.marginTop = '12px';
-        analysisInfo.style.fontSize = '15px';
-        analysisInfo.style.color = '#23408e';
-        loadingIndicator.appendChild(analysisInfo);
-    }
-    analysisInfo.textContent = '';
+    if (analysisInfo) analysisInfo.textContent = '';
 
     try {
         const response = await fetch('/analyze', {
@@ -368,13 +360,13 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
         const data = await response.json();
         
         // --- Новый блок: отображаем настройки анализа ---
-        if (data.analysis_settings) {
+        if (data.analysis_settings && analysisInfo) {
             let mode = data.analysis_settings.inference_mode === 'model' ? 'модель' : 'алгоритм';
             let manual = data.analysis_settings.manual_review_enabled ? 'с ручной разметкой' : 'без ручной разметки';
             let format = data.analysis_settings.export_format === 'bimstep' ? 'BIM Step' : 'стандартный';
             let model = data.analysis_settings.model_file || '';
             analysisInfo.textContent = `В режиме ${mode} ${manual}. Формат экспорта: ${format}${mode === 'модель' ? `, модель: ${model}` : ''}`;
-        } else {
+        } else if (analysisInfo) {
             analysisInfo.textContent = '';
         }
 
