@@ -43,13 +43,11 @@
         </div>
     </form>
     
-    <!-- Индикатор выбранных настроек -->
-    <div id="analysisInfo" style="margin-bottom: 12px; font-size: 15px; color: #23408e;"></div>
     <!-- Индикатор загрузки -->
     <div id="loadingIndicator" style="display: none;" class="loading-container">
         <div class="loading-spinner"></div>
         <p>Выполняется анализ коллизий...</p>
-        <div id="analysisInfo" style="margin-bottom: 12px; font-size: 15px; color: #23408e;"></div>
+        <div id="analysisInfo" style="margin-bottom: 12px; font-size: 15px"></div>
         <p>Это может занять несколько минут в зависимости от количества файлов.</p>
     </div>
     
@@ -75,6 +73,33 @@
     <div id="infoText"></div>
   </div>
 </div>
+
+    <!-- Модальное окно для ручной разметки -->
+    <div id="manualReviewModal" class="manual-review-modal" style="display:none;">
+        <div class="manual-review-content">
+            <span class="manual-review-close" onclick="closeManualReview()">&times;</span>
+            <div id="manualReviewImageBlock">
+                <img id="manualReviewImage" src="" alt="Изображение коллизии" style="max-width:420px;max-height:320px;display:block;margin:0 auto 16px auto;">
+            </div>
+            <div id="manualReviewInfo" style="margin-bottom:16px;text-align:center;"></div>
+            <div style="display:flex;justify-content:center;gap:16px;">
+                <button class="main-btn accent" id="btnApprove" onclick="markManualReview('Approved')">Approved</button>
+                <button class="main-btn accent" id="btnActive" onclick="markManualReview('Active')">Active</button>
+                <button class="main-btn" id="btnReviewed" onclick="markManualReview('Reviewed')">Reviewed</button>
+            </div>
+        </div>
+    </div>
+    <style>
+    .manual-review-modal {
+        position: fixed; z-index: 10000; left: 0; top: 0; width: 100vw; height: 100vh;
+        background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center;
+    }
+    .manual-review-content {
+        background: #fff; border-radius: 16px; padding: 32px 32px 24px 32px; min-width: 340px; max-width: 520px; box-shadow: 0 4px 32px #0003; position: relative;
+    }
+    .manual-review-close {
+        position: absolute; right: 18px; top: 12px; font-size: 28px; color: #23408e; cursor: pointer;}
+    </style>
 
 <style>
 .loading-container {

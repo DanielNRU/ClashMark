@@ -350,6 +350,60 @@ document.addEventListener('DOMContentLoaded', function() {
     // ... существующий код ...
 });
 
+// --- Модальное окно для ручной разметки ---
+let manualReviewQueue = [];
+let manualReviewIndex = 0;
+let manualReviewResults = [];
+
+function showManualReviewModal(collisions) {
+    manualReviewQueue = collisions;
+    manualReviewIndex = 0;
+    manualReviewResults = [];
+    if (manualReviewQueue.length > 0) {
+        renderManualReviewItem();
+        document.getElementById('manualReviewModal').style.display = 'flex';
+    }
+}
+
+function renderManualReviewItem() {
+    const item = manualReviewQueue[manualReviewIndex];
+    if (!item) return closeManualReview();
+    // Картинка
+    const img = document.getElementById('manualReviewImage');
+    if (item.image_file) {
+        img.src = item.image_file.startsWith('http') ? item.image_file : `/download/${item.source_file}/${encodeURIComponent(item.image_file.split('/').pop())}`;
+        img.style.display = '';
+    } else {
+        img.src = '';
+        img.style.display = 'none';
+    }
+    // Инфо
+    document.getElementById('manualReviewInfo').innerHTML =
+        `<b>Категории:</b> ${item.element1_category} — ${item.element2_category}<br>` +
+        (item.description ? `<b>Описание:</b> ${item.description}` : '');
+}
+
+function markManualReview(status) {
+    const item = manualReviewQueue[manualReviewIndex];
+    manualReviewResults.push({
+        clash_id: item.clash_id,
+        status: status
+    });
+    manualReviewIndex++;
+    if (manualReviewIndex < manualReviewQueue.length) {
+        renderManualReviewItem();
+    } else {
+        closeManualReview();
+        // TODO: отправить результаты на backend или применить локально
+        alert('Ручная разметка завершена!');
+    }
+}
+
+function closeManualReview() {
+    document.getElementById('manualReviewModal').style.display = 'none';
+}
+
+// --- Встраиваем запуск ручной разметки после анализа ---
 document.getElementById('analyzeForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     
@@ -382,6 +436,9 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
             errorContainer.style.display = 'block';
         } else {
             // ... остальной код ...
+            if (data.manual_review_collisions && Array.isArray(data.manual_review_collisions) && data.manual_review_collisions.length > 0) {
+                showManualReviewModal(data.manual_review_collisions);
+            }
         }
     } catch (error) {
         errorContainer.innerHTML = `<span class="icon">⚠️</span> Ошибка сети: ${error.message}`;
