@@ -332,25 +332,52 @@ if (searchInput) {
 
 // Логика разметки visual/Reviewed реализована на backend, frontend только отображает результат
 
-document.getElementById('trainForm').addEventListener('submit', async function(e) {
+document.getElementById('analyzeForm').addEventListener('submit', async function(e) {
     e.preventDefault();
+    
     const formData = new FormData(this);
-    const trainBtn = document.getElementById('trainBtn');
+    const analyzeBtn = document.getElementById('analyzeBtn');
     const loadingIndicator = document.getElementById('loadingIndicator');
     const results = document.getElementById('results');
     const errorContainer = document.getElementById('errorContainer');
     // Показываем индикатор загрузки
-    trainBtn.disabled = true;
-    // trainBtn.innerHTML = '<span class="loading"></span> Обучение выполняется...'; // УБРАНО
+    analyzeBtn.disabled = true;
+    analyzeBtn.innerHTML = 'Анализ выполняется...';
     loadingIndicator.style.display = 'block';
     results.style.display = 'none';
     errorContainer.style.display = 'none';
+
+    // --- Новый блок: выводим настройки анализа ---
+    let analysisInfo = document.getElementById('analysisInfo');
+    if (!analysisInfo) {
+        analysisInfo = document.createElement('div');
+        analysisInfo.id = 'analysisInfo';
+        analysisInfo.style.marginTop = '12px';
+        analysisInfo.style.fontSize = '15px';
+        analysisInfo.style.color = '#23408e';
+        loadingIndicator.appendChild(analysisInfo);
+    }
+    analysisInfo.textContent = '';
+
     try {
-        const response = await fetch('/api/train', {
+        const response = await fetch('/analyze', {
             method: 'POST',
             body: formData
         });
+        
         const data = await response.json();
+        
+        // --- Новый блок: отображаем настройки анализа ---
+        if (data.analysis_settings) {
+            let mode = data.analysis_settings.inference_mode === 'model' ? 'модель' : 'алгоритм';
+            let manual = data.analysis_settings.manual_review_enabled ? 'с ручной разметкой' : 'без ручной разметки';
+            let format = data.analysis_settings.export_format === 'bimstep' ? 'BIM Step' : 'стандартный';
+            let model = data.analysis_settings.model_file || '';
+            analysisInfo.textContent = `В режиме ${mode} ${manual}. Формат экспорта: ${format}${mode === 'модель' ? `, модель: ${model}` : ''}`;
+        } else {
+            analysisInfo.textContent = '';
+        }
+
         if (data.error) {
             errorContainer.innerHTML = `<span class="icon">⚠️</span> ${data.error}`;
             errorContainer.style.display = 'block';
@@ -362,8 +389,10 @@ document.getElementById('trainForm').addEventListener('submit', async function(e
         errorContainer.style.display = 'block';
     } finally {
         // Скрываем индикатор загрузки
-        trainBtn.disabled = false;
-        // trainBtn.innerHTML = '🚀 Начать обучение'; // УБРАНО
+        analyzeBtn.disabled = false;
+        analyzeBtn.innerHTML = '🔍 Начать анализ';
         loadingIndicator.style.display = 'none';
+        // Очищаем analysisInfo
+        if (analysisInfo) analysisInfo.textContent = '';
     }
 });

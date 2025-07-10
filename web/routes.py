@@ -13,7 +13,7 @@ import uuid
 from core.xml_utils import (
     load_all_category_pairs, get_pair, parse_xml_data, export_to_bimstep_xml, export_to_xml, add_bimstep_journal_entry
 )
-from core.image_utils import find_image_by_href, find_image_by_name, find_image_by_relative_path
+from core.image_utils import find_image_by_name
 from ml.model import create_model
 from ml.dataset import CollisionImageDataset, create_transforms
 from ml.inference import predict, fill_xml_fields
@@ -300,7 +300,8 @@ def analyze_files():
                 # Используем пороги уверенности из настроек
                 visual_pred_df = predict(model, device, visual_df, transform, 
                                        low_confidence_threshold=low_confidence, 
-                                       high_confidence_threshold=high_confidence)
+                                       high_confidence_threshold=high_confidence,
+                                       session_dir=session_dir)
                 for i, idx in enumerate(visual_indices):
                     prediction = int(visual_pred_df.iloc[i]['cv_prediction'])
                     confidence = float(visual_pred_df.iloc[i]['cv_confidence'])
@@ -420,13 +421,21 @@ def analyze_files():
             'total_active': sum(f['active_count'] for f in stats_per_file),
             'total_reviewed': sum(f['reviewed_count'] for f in stats_per_file)
         }
+        # Добавляем инфо о настройках
+        analysis_settings = {
+            'inference_mode': inference_mode,
+            'manual_review_enabled': manual_review_enabled,
+            'export_format': export_format,
+            'model_file': settings.get('model_file', 'model_clashmark.pt')
+        }
         return jsonify(to_py({
             'success': True,
             'session_id': session_id,
             'download_links': download_links,
             'stats_per_file': stats_per_file,
             'stats_total': stats_total,
-            'used_images': export_format == 'standard'
+            'used_images': export_format == 'standard',
+            'analysis_settings': analysis_settings
         }))
         
     except Exception as e:
@@ -679,7 +688,7 @@ def api_train():
         df_visual = df[df.apply(lambda row: get_pair(row) in visual_pairs, axis=1)].copy()
         
         if len(df_visual) == 0:
-            return jsonify({'error': 'После фильтрации по visual-парам не осталось данных для обучения!'})
+            return jsonify({'error': 'Нет подходящих коллизий для обучения модели (Approved и Active)!'})
         
         # Проверяем наличие image_file
         if 'image_file' not in df_visual.columns:
