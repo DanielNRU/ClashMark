@@ -387,15 +387,36 @@ function markManualReview(status) {
     const item = manualReviewQueue[manualReviewIndex];
     manualReviewResults.push({
         clash_id: item.clash_id,
-        status: status
+        status: status,
+        source_file: item.source_file
     });
     manualReviewIndex++;
     if (manualReviewIndex < manualReviewQueue.length) {
         renderManualReviewItem();
     } else {
         closeManualReview();
-        // TODO: отправить результаты на backend или применить локально
-        alert('Ручная разметка завершена!');
+        // Отправляем результаты на backend
+        const sessionId = window.lastSessionId || null;
+        if (sessionId) {
+            fetch('/api/manual_review', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId, reviews: manualReviewResults })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Ручная разметка успешно сохранена!');
+                } else {
+                    alert('Ошибка сохранения разметки: ' + (data.error || 'Неизвестная ошибка'));
+                }
+            })
+            .catch(e => {
+                alert('Ошибка сети при сохранении разметки: ' + e.message);
+            });
+        } else {
+            alert('Ручная разметка завершена! (session_id не найден)');
+        }
     }
 }
 
@@ -436,6 +457,7 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
             errorContainer.style.display = 'block';
         } else {
             // ... остальной код ...
+            if (data.session_id) window.lastSessionId = data.session_id;
             if (data.manual_review_collisions && Array.isArray(data.manual_review_collisions) && data.manual_review_collisions.length > 0) {
                 showManualReviewModal(data.manual_review_collisions);
             }
