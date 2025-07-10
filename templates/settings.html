@@ -1,0 +1,529 @@
+{% extends 'base.html' %}
+{% block title %}ClashMark — Настройки{% endblock %}
+{% block content %}
+<style>
+.settings-container {
+    max-width: 900px;
+    margin: 32px auto;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px #0001;
+    padding: 32px;
+}
+.settings-section {
+    margin-bottom: 32px;
+    background: #f8f9fa;
+    border-radius: 12px;
+    padding: 24px;
+}
+.settings-title {
+    font-size: 1.4em;
+    font-weight: 600;
+    margin-bottom: 20px;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 2px solid #e9ecef;
+    padding-bottom: 12px;
+}
+.form-group {
+    margin-bottom: 20px;
+}
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: #555;
+    font-size: 14px;
+}
+.form-group input, .form-group select {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    background: #fff;
+}
+.form-group input:focus, .form-group select:focus {
+    outline: none;
+    border-color: #23408e;
+    box-shadow: 0 0 0 3px rgba(35, 64, 142, 0.1);
+}
+.form-group input[type="checkbox"] {
+    width: auto;
+    margin-right: 8px;
+    transform: scale(1.2);
+}
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+.form-row.full-width {
+    grid-template-columns: 1fr;
+}
+.form-row.half-width {
+    grid-template-columns: 1fr 1fr;
+}
+.form-row.three-cols {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+.buttons-row {
+    display: flex;
+    gap: 12px;
+    margin-top: 24px;
+    flex-wrap: wrap;
+}
+.settings-input {
+    min-width: 320px;
+    max-width: 520px;
+    width: 100% !important;
+    box-sizing: border-box;
+}
+#modelSelect.settings-input {
+    min-width: 640px;
+    max-width: 1040px;
+}
+.form-group input.settings-input,
+.form-group select.settings-input {
+    width: 100% !important;
+    min-width: 320px;
+    max-width: 520px;
+    box-sizing: border-box;
+}
+.metric-item {
+    background: #f8f9fa;
+    padding: 20px 24px;
+    border-radius: 12px;
+    text-align: center;
+    border: 1.5px solid #e9ecef;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 8px #0001;
+    font-size: 18px;
+    display: inline-block;
+    width: 140px;
+    flex-shrink: 0;
+}
+.metric-label {
+    font-size: 13px;
+    color: #6c757d;
+    margin-bottom: 8px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.metric-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: #23408e;
+}
+.btn {
+    padding: 14px 32px;
+    border: none;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 2px 8px #0001;
+    background: linear-gradient(90deg, #23408e 60%, #3b5998 100%);
+    color: #fff;
+}
+.btn:hover {
+    background: linear-gradient(90deg, #1a2a4f 60%, #23408e 100%);
+    transform: translateY(-2px) scale(1.03);
+    box-shadow: 0 4px 16px #0002;
+}
+.btn-danger {
+    background: linear-gradient(90deg, #dc3545 60%, #b71c1c 100%);
+    color: #fff;
+}
+.btn-danger:hover {
+    background: linear-gradient(90deg, #b71c1c 60%, #dc3545 100%);
+}
+.confusion-matrix {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 2px 16px #0001;
+    overflow: hidden;
+    margin-bottom: 24px;
+    font-size: 16px;
+    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+}
+.confusion-matrix th, .confusion-matrix td {
+    padding: 16px 20px;
+    text-align: center;
+    border: none;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+.confusion-matrix th {
+    background: #23408e;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+.confusion-matrix th:hover {
+    background: #1a2a4f;
+}
+.confusion-matrix tr {
+    transition: background 0.2s;
+}
+.confusion-matrix tr:hover {
+    background: #f0f4fa;
+}
+.confusion-matrix td {
+    border-bottom: 1px solid #e9ecef;
+    background: #fff;
+    color: #23408e;
+    font-weight: 600;
+    font-size: 18px;
+}
+.confusion-matrix tr:last-child td {
+    border-bottom: none;
+}
+.confusion-matrix td:first-child {
+    background: #3b5998;
+    color: #fff;
+    font-weight: 600;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.confusion-matrix td:first-child:hover {
+    background: #23408e;
+}
+/* Цветовая схема для матрицы ошибок */
+.confusion-matrix .tp, .confusion-matrix .tn {
+    background: #e8f5e8 !important;
+    color: #2e7d32 !important;
+}
+.confusion-matrix .fp, .confusion-matrix .fn {
+    background: #fce4ec !important;
+    color: #c2185b !important;
+}
+</style>
+
+<div class="page-title">
+    Настройки
+    <span class="info-icon" onclick="showInfo()" title="Информация о странице">ℹ️</span>
+</div>
+
+<div class="settings-container">
+    <form method="post" id="settingsForm">
+        <input type="hidden" name="action" id="formAction" value="save">
+        
+        <div class="settings-section">
+            <div class="settings-title">
+                ⚙️ Настройки модели
+            </div>
+            <div class="form-row" style="gap:32px;">
+                <div class="form-group">
+                    <label>Файл модели:</label>
+                    <select name="model_file" id="modelSelect" onchange="updateModelStats()" class="settings-input">
+                        {% for file in model_files %}
+                            <option value="{{ file }}" {% if settings.model_file == file %}selected{% endif %}>
+                                {{ file }}
+                                {% if model_metrics[file] %}
+                                    (E: {{ model_metrics[file].epochs|default('—') }}, 
+                                     B: {{ model_metrics[file].batch_size|default('—') }}, 
+                                     Acc: {{ model_metrics[file].final_accuracy|round(3)|default('—') }}, 
+                                     Prec: {{ model_metrics[file].final_precision|round(3)|default('—') }}, 
+                                     Rec: {{ model_metrics[file].final_recall|round(3)|default('—') }}, 
+                                     F1: {{ model_metrics[file].final_f1|round(3)|default('—') }})
+                                {% endif %}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row" style="gap:32px;">
+                <div class="form-group">
+                    <label>Порог низкой уверенности:</label>
+                    <input type="number" step="0.01" min="0" max="1" name="low_confidence" value="{{ settings.low_confidence }}" class="settings-input">
+                </div>
+                <div class="form-group">
+                    <label>Порог высокой уверенности:</label>
+                    <input type="number" step="0.01" min="0" max="1" name="high_confidence" value="{{ settings.high_confidence }}" class="settings-input">
+                </div>
+            </div>
+            
+            <div class="form-row" style="gap:32px;">
+                <div class="form-group">
+                    <label>Режим инференса:</label>
+                    <select name="inference_mode" class="settings-input">
+                        <option value="model" {% if settings.inference_mode == 'model' %}selected{% endif %}>Модель</option>
+                        <option value="algorithm" {% if settings.inference_mode == 'algorithm' %}selected{% endif %}>Алгоритм</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Формат экспорта:</label>
+                    <select name="export_format" class="settings-input">
+                        <option value="standard" {% if settings.export_format == 'standard' %}selected{% endif %}>Стандартный</option>
+                        <option value="bimstep" {% if settings.export_format == 'bimstep' %}selected{% endif %}>BIM Step</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" name="manual_review_enabled" {% if settings.manual_review_enabled %}checked{% endif %}>
+                    Включить ручную разметку
+                </label>
+            </div>
+        </div>
+        
+        <div class="buttons-row">
+            <button type="submit" class="btn btn-primary" onclick="setAction('save')">
+                💾 Сохранить настройки
+            </button>
+            <button type="submit" class="btn btn-danger" onclick="setAction('delete_model')">
+                🗑️ Удалить выбранную модель
+            </button>
+            <button type="submit" class="btn btn-danger" onclick="setAction('clear_cache')">
+                🧹 Удалить кэш
+            </button>
+        </div>
+    </form>
+    
+    <div id="modelStatsSection" class="settings-section" style="display: none; margin-top: 48px;">
+        <div class="settings-title">
+            📊 Метрики выбранной модели
+        </div>
+        
+        <div class="metrics-section" style="margin-bottom:24px;">
+            <div style="display:flex;gap:16px;justify-content:center;flex-wrap:nowrap;">
+                <div class="metric-item">
+                    <div class="metric-label">Accuracy</div>
+                    <div class="metric-value" id="accuracyValue">—</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">F1-score</div>
+                    <div class="metric-value" id="f1Value">—</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Recall</div>
+                    <div class="metric-value" id="recallValue">—</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Precision</div>
+                    <div class="metric-value" id="precisionValue">—</div>
+                </div>
+            </div>
+        </div>
+        <div id="modelStatsExtra" style="margin-bottom:24px;"></div>
+        <h4>📋 Категории:</h4>
+        <div class="category-pairs-block">
+            <input type="text" id="categoryPairsSearch" placeholder="Поиск по категориям..." class="form-control" style="margin-bottom:12px;max-width:320px;display:none;">
+            <div id="categoryPairsList"></div>
+        </div>
+        
+        <h4>🎯 Матрица ошибок:</h4>
+        <div id="confusionMatrix">
+        </div>
+    </div>
+    
+    {% if error %}
+        <div class="error-block"><span class="icon">&#9888;</span> {{ error|safe }}</div>
+    {% endif %}
+    {% if message %}
+        <div class="message-block"><span class="icon">&#10003;</span> {{ message }}</div>
+    {% endif %}
+</div>
+
+<!-- Модальное окно для информации -->
+<div id="infoModal" class="info-modal" style="display:none;">
+  <div class="info-modal-content">
+    <span class="info-modal-close" onclick="closeInfo()">&times;</span>
+    <div id="infoText"></div>
+  </div>
+</div>
+
+<script id="modelMetricsData" type="application/json">{{ model_metrics|tojson|safe }}</script>
+<script>
+// Получаем данные метрик для всех моделей из JSON-скрипта
+const modelMetrics = JSON.parse(document.getElementById('modelMetricsData').textContent);
+
+function setAction(action) {
+    document.getElementById('formAction').value = action;
+}
+
+function renderCategoryPairsTable(pairs, sortCol = 2, sortDir = 'desc') {
+    const container = document.getElementById('categoryPairsList');
+    container.innerHTML = '';
+    if (!pairs || pairs.length === 0) {
+        container.innerHTML = '<div class="empty">Нет пар</div>';
+        return;
+    }
+    const search = (document.getElementById('categoryPairsSearch')?.value || '').toLowerCase();
+    let filtered = pairs.filter(pair =>
+        pair[0].toLowerCase().includes(search) ||
+        pair[1].toLowerCase().includes(search)
+    );
+    filtered.sort((a, b) => {
+        let v1 = a[sortCol], v2 = b[sortCol];
+        if (sortCol === 2) { v1 = +v1; v2 = +v2; }
+        if (v1 < v2) return sortDir === 'asc' ? -1 : 1;
+        if (v1 > v2) return sortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+    let html = '<table class="category-pairs-table"><thead><tr>' +
+        '<th data-col="0">Категория 1</th>' +
+        '<th data-col="1">Категория 2</th>' +
+        '<th data-col="2">Кол-во</th>' +
+        '</tr></thead><tbody>';
+    filtered.forEach(pair => {
+        html += `<tr><td>${pair[0]}</td><td>${pair[1]}</td><td>${pair[2]}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+    // Сортировка по клику
+    const ths = container.querySelectorAll('th');
+    ths.forEach(th => {
+        th.style.cursor = 'pointer';
+        th.onclick = function() {
+            let col = +th.getAttribute('data-col');
+            let dir = (window.categoryPairsSortCol === col && window.categoryPairsSortDir === 'asc') ? 'desc' : 'asc';
+            window.categoryPairsSortCol = col;
+            window.categoryPairsSortDir = dir;
+            renderCategoryPairsTable(window.categoryPairsData, col, dir);
+        };
+    });
+}
+
+function renderConfusionMatrixSettings(matrix) {
+    if (!Array.isArray(matrix) || !matrix.length || !Array.isArray(matrix[0])) return '<div style="color:#888">Нет данных</div>';
+    
+    const n = matrix.length;
+    const m = matrix[0].length;
+    
+    // Определяем подписи классов на основе размера матрицы
+    const classLabels = n === 2 ? ['Approve', 'Active'] : 
+                       n === 3 ? ['Approve', 'Active', 'Reviewed'] : 
+                       Array.from({length: n}, (_, i) => `Класс ${i}`);
+    
+    let html = `<table class="confusion-matrix">
+        <thead><tr><th>Прогноз \\ Факт</th>`;
+    
+    for (let j = 0; j < m; j++) {
+        html += `<th>${classLabels[j]}</th>`;
+    }
+    html += `</tr></thead><tbody>`;
+    
+    for (let i = 0; i < n; i++) {
+        html += `<tr><th>${classLabels[i]}</th>`;
+        for (let j = 0; j < m; j++) {
+            const value = matrix[i][j];
+            const isDiagonal = i === j;
+            // TP/TN (диагональ) - зелёный, FP/FN (не диагональ) - розовый
+            const cssClass = isDiagonal ? 'tp' : 'fp';
+            html += `<td class="${cssClass}">${value}</td>`;
+        }
+        html += `</tr>`;
+    }
+    html += `</tbody></table>`;
+    
+    return html;
+}
+
+function updateModelStats() {
+    const selectedModel = document.getElementById('modelSelect').value;
+    const statsSection = document.getElementById('modelStatsSection');
+    const extraStats = document.getElementById('modelStatsExtra');
+    if (modelMetrics[selectedModel]) {
+        const metrics = modelMetrics[selectedModel];
+        document.getElementById('accuracyValue').textContent = metrics.final_accuracy ? metrics.final_accuracy.toFixed(3) : '—';
+        document.getElementById('f1Value').textContent = metrics.final_f1 ? metrics.final_f1.toFixed(3) : '—';
+        document.getElementById('recallValue').textContent = metrics.final_recall ? metrics.final_recall.toFixed(3) : '—';
+        document.getElementById('precisionValue').textContent = metrics.final_precision ? metrics.final_precision.toFixed(3) : '—';
+        extraStats.innerHTML = '';
+        if (metrics.category_pairs && metrics.category_pairs.length) {
+            window.categoryPairsSortCol = 2;
+            window.categoryPairsSortDir = 'desc';
+            window.categoryPairsData = metrics.category_pairs;
+            document.getElementById('categoryPairsSearch').style.display = '';
+            renderCategoryPairsTable(window.categoryPairsData, window.categoryPairsSortCol, window.categoryPairsSortDir);
+        } else {
+            document.getElementById('categoryPairsSearch').style.display = 'none';
+            document.getElementById('categoryPairsList').innerHTML = '';
+        }
+        // --- Исправленный блок для матрицы ошибок ---
+        let confusionMatrix = null;
+        
+        // Проверяем все возможные места, где может быть confusion_matrix
+        if (metrics.confusion_matrix && Array.isArray(metrics.confusion_matrix) && metrics.confusion_matrix.length > 0) {
+            confusionMatrix = metrics.confusion_matrix;
+        } else if (metrics.metrics && metrics.metrics.confusion_matrix && Array.isArray(metrics.metrics.confusion_matrix) && metrics.metrics.confusion_matrix.length > 0) {
+            confusionMatrix = metrics.metrics.confusion_matrix;
+        }
+        
+        let matrixHtml = '<div style="color:#888">Нет данных</div>';
+        if (confusionMatrix && Array.isArray(confusionMatrix[0])) {
+            matrixHtml = renderConfusionMatrixSettings(confusionMatrix);
+        }
+        document.getElementById('confusionMatrix').innerHTML = matrixHtml;
+        statsSection.style.display = 'block';
+    } else {
+        extraStats.innerHTML = '';
+        document.getElementById('categoryPairsSearch').style.display = 'none';
+        document.getElementById('categoryPairsList').innerHTML = '';
+        document.getElementById('confusionMatrix').innerHTML = '';
+        statsSection.style.display = 'none';
+    }
+}
+
+// Унифицирую showCategoryPairsTable и обработчик поиска:
+function showCategoryPairsTable(pairs) {
+    window.categoryPairsSortCol = window.categoryPairsSortCol ?? 2;
+    window.categoryPairsSortDir = window.categoryPairsSortDir ?? 'desc';
+    window.categoryPairsData = pairs;
+    const searchInput = document.getElementById('categoryPairsSearch');
+    if (pairs && pairs.length) {
+        if (searchInput) searchInput.style.display = '';
+        renderCategoryPairsTable(pairs, window.categoryPairsSortCol, window.categoryPairsSortDir);
+    } else {
+        if (searchInput) searchInput.style.display = 'none';
+        const list = document.getElementById('categoryPairsList');
+        if (list) list.innerHTML = '';
+    }
+}
+
+function showInfo() {
+    document.getElementById('infoText').innerText = 'В "Настройках" выберите модель, пороги уверенности, режим инференса и формат экспорта. Порог низкой уверенности — ниже этого значения модель считает коллизию разрешённой, выше высокого — активной, между ними — требует ручной проверки.';
+    document.getElementById('infoModal').style.display = 'block';
+}
+
+function closeInfo() {
+    document.getElementById('infoModal').style.display = 'none';
+}
+
+// Инициализация при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    updateModelStats();
+    document.querySelector('.info-modal-close').onclick = closeInfo;
+    document.getElementById('infoModal').onclick = function(e) { 
+        if (e.target === this) closeInfo(); 
+    };
+    const searchInput = document.getElementById('categoryPairsSearch');
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            showCategoryPairsTable(window.categoryPairsData);
+        });
+    }
+});
+</script>
+{% endblock %} 

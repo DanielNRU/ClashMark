@@ -1,0 +1,22 @@
+[
+  {
+    "train_time": "2025-07-03T14:17:50.355849",
+    "model_file": "model_clashmark.pt",
+    "final_accuracy": 0.9069767441860465,
+    "final_f1": 0.8782945736434108,
+    "final_recall": 0.9069767441860465,
+    "final_precision": 0.9158361018826134,
+    "confusion_matrix": [
+      [
+        38,
+        0
+      ],
+      [
+        4,
+        1
+      ]
+    ],
+    "epochs": 5,
+    "batch_size": 16
+  }
+]

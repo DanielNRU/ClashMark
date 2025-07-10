@@ -1,0 +1,7 @@
+{% macro safe_round(val) %}
+    {% if val is not none and val is not undefined %}
+        {{ val|round(3) }}
+    {% else %}
+        —
+    {% endif %}
+{% endmacro %} 

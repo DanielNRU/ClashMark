@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>{% block title %}ClashMark{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" type="image/png" href="/static/logo.png">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <header class="main-header">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 64px;">
+            <div class="header-left">
+                <a href="/" class="logo-link"><img src="{{ url_for('static', filename='logo.png') }}" alt="logo" class="logo"></a>
+            </div>
+            <nav class="header-nav">
+                <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">Главная</a>
+                <a href="/settings" class="nav-link {% if '/settings' in request.path %}active{% endif %}">Настройки</a>
+                <a href="/train" class="nav-link {% if '/train' in request.path %}active{% endif %}">Обучение</a>
+            </nav>
+        </div>
+    </header>
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+    <script src="{{ url_for('static', filename='scripts.js') }}"></script>
+</body>
+</html> 

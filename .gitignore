@@ -1,0 +1,133 @@
+# Каталог с обучающими данными
+Обучение/
+
+# Временные файлы и папки
+temp_uploads/
+temp_*/
+analysis_session_*/
+train_session_*/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Модели машинного обучения (кроме основной)
+model/*.pt
+model/*.pth
+model/*_stats.json
+!model/model_clashmark.pt
+
+# Логи и отладочные файлы
+*.log
+*.out
+*.err
+debug.log
+
+# Настройки и конфигурации
+settings.json
+.env
+.env.local
+.env.production
+
+# Временные файлы сессий
+session_*/
+*.session
+
+# Файлы IDE и редакторов
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Файлы сборки и дистрибутивы
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Тестовые файлы
+test_*.py
+*_test.py
+test_*.xml
+test_*.zip
+
+# Архивы и сжатые файлы
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Файлы базы данных
+*.db
+*.sqlite
+*.sqlite3
+
+# Файлы кэша
+.cache/
+*.cache
+
+# Файлы Docker
+.dockerignore
+docker-compose.override.yml
+
+# Файлы Node.js (если используются)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Файлы Python виртуального окружения
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Файлы Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Файлы резервных копий
+*.bak
+*.backup
+*.old
+
+# Файлы с персональными данными
+personal_data/
+user_data/
+private/
+
+# Файлы лицензий и ключей
+*.key
+*.pem
+*.p12
+*.pfx
+license.txt
+license.key
+
+# Файлы результатов анализа (временные)
+cv_results_*.xml
+bimstep_results_*.xml
+JournalBimStep.xml
+
+# Файлы изображений (если они большие)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.tif
+
+# Исключения для важных файлов
+!static/logo.png
+!README.md
+!INSTRUCTION.md
+!requirements.txt
+!app.py
+!category_pairs.yaml 
