@@ -430,6 +430,19 @@ def analyze_files():
             'total_active': sum(f['active_count'] for f in stats_per_file),
             'total_reviewed': sum(f['reviewed_count'] for f in stats_per_file)
         }
+        # --- Новый блок: формируем список для ручной разметки ---
+        manual_review_collisions = []
+        if manual_review_enabled:
+            for _, row in df.iterrows():
+                if row.get('cv_prediction') == -1 and row.get('prediction_source') == 'manual_review':
+                    manual_review_collisions.append({
+                        'clash_id': row.get('clash_id', ''),
+                        'image_file': row.get('image_file', ''),
+                        'element1_category': row.get('element1_category', ''),
+                        'element2_category': row.get('element2_category', ''),
+                        'description': row.get('clash_name', ''),
+                        'source_file': row.get('source_file', '')
+                    })
         return jsonify(to_py({
             'success': True,
             'session_id': session_id,
@@ -437,7 +450,8 @@ def analyze_files():
             'stats_per_file': stats_per_file,
             'stats_total': stats_total,
             'used_images': export_format == 'standard',
-            'analysis_settings': analysis_settings
+            'analysis_settings': analysis_settings,
+            'manual_review_collisions': manual_review_collisions
         }))
         
     except Exception as e:
