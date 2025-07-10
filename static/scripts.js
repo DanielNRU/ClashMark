@@ -393,6 +393,6 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
         analyzeBtn.innerHTML = '🔍 Начать анализ';
         loadingIndicator.style.display = 'none';
         // Очищаем analysisInfo
-        if (analysisInfo) analysisInfo.textContent = '';
+        // if (analysisInfo) analysisInfo.textContent = ''; // Удалено
     }
 });
