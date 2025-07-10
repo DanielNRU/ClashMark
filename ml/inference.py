@@ -15,17 +15,14 @@ def fill_xml_fields(df):
     for idx, row in df_result.iterrows():
         prediction = row['cv_prediction']
         if prediction == 0:
-            # Approved (can)
             df_result.at[idx, 'IsResolved'] = 0
             df_result.at[idx, 'status'] = 'approved'
             df_result.at[idx, 'resultstatus'] = 'Подтверждено'
         elif prediction == 1:
-            # Active (cannot)
             df_result.at[idx, 'IsResolved'] = 1
             df_result.at[idx, 'status'] = 'active'
             df_result.at[idx, 'resultstatus'] = 'Активн.'
         elif prediction == -1:
-            # Reviewed (visual)
             df_result.at[idx, 'IsResolved'] = -1
             df_result.at[idx, 'status'] = 'reviewed'
             df_result.at[idx, 'resultstatus'] = 'Проанализировано'
@@ -50,13 +47,10 @@ def predict(model, device, df, transform, batch_size=16, confidence_threshold=0.
             batch_predictions = []
             for prob in batch_confidences:
                 if prob >= high_confidence_threshold:
-                    # Высокая уверенность -> Active (cannot)
                     batch_predictions.append(1)
                 elif prob <= low_confidence_threshold:
-                    # Низкая уверенность -> Approved (can)
                     batch_predictions.append(0)
                 else:
-                    # Средняя уверенность -> Reviewed (visual)
                     batch_predictions.append(-1)
             predictions.extend(batch_predictions)
             confidences.extend(batch_confidences)

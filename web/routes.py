@@ -41,7 +41,7 @@ session_dirs = {}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format='standard', need_images=False):
+def collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format='standard'):
     """Собирает датасет из XML файлов с учетом временной папки сессии и формата экспорта"""
     all_data = []
     
@@ -58,28 +58,24 @@ def collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_fo
             # Добавляем информацию о файле
             df_file['source_file'] = orig_filename
             
-            # Ищем изображения только если они нужны для инференса моделью
-            if need_images:
-                for idx, row in df_file.iterrows():
-                    image_href = row.get('image_href', '')
-                    if image_href:
-                        # Пытаемся найти изображение по href
-                        image_path = find_image_by_href(image_href, session_dir)
+            # Ищем изображения для каждой коллизии
+            for idx, row in df_file.iterrows():
+                image_href = row.get('image_href', '')
+                if image_href:
+                    # Пытаемся найти изображение по href
+                    image_path = find_image_by_href(image_href, session_dir)
+                    if image_path and os.path.exists(image_path):
+                        df_file.at[idx, 'image_file'] = image_path
+                    else:
+                        # Пытаемся найти по имени файла
+                        image_name = os.path.basename(image_href)
+                        image_path = find_image_by_name(image_name, session_dir)
                         if image_path and os.path.exists(image_path):
                             df_file.at[idx, 'image_file'] = image_path
                         else:
-                            # Пытаемся найти по имени файла
-                            image_name = os.path.basename(image_href)
-                            image_path = find_image_by_name(image_name, session_dir)
-                            if image_path and os.path.exists(image_path):
-                                df_file.at[idx, 'image_file'] = image_path
-                            else:
-                                df_file.at[idx, 'image_file'] = ''
-                    else:
-                        df_file.at[idx, 'image_file'] = ''
-            else:
-                # Если изображения не нужны, просто добавляем пустую колонку
-                df_file['image_file'] = ''
+                            df_file.at[idx, 'image_file'] = ''
+                else:
+                    df_file.at[idx, 'image_file'] = ''
             
             all_data.append(df_file)
             
@@ -175,6 +171,14 @@ def analyze_files():
         if not xml_files:
             return jsonify({'error': 'Не выбраны XML файлы!'})
         
+        # Загружаем настройки
+        settings = load_settings()
+        export_format = settings.get('export_format', 'standard')
+        
+        # Для стандартного формата требуем ZIP архивы, для BIM Step - не обязательно
+        if export_format == 'standard' and not zip_files:
+            return jsonify({'error': 'Для стандартного формата необходимо загрузить ZIP архивы с изображениями!'})
+        
         # Создаем временную папку для сессии
         session_dir = tempfile.mkdtemp(prefix='analysis_session_')
         session_id = os.path.basename(session_dir)
@@ -196,30 +200,8 @@ def analyze_files():
             original_xml_names.append(os.path.splitext(safe_filename)[0])
             xml_path_name_pairs.append((xml_path, safe_filename))
         
-        # Загружаем настройки для определения необходимости поиска изображений
-        settings = load_settings()
-        export_format = settings.get('export_format', 'standard')
-        inference_mode = settings.get('inference_mode', 'model')
-        manual_review_enabled = settings.get('manual_review_enabled', False)
-        
-        # Определяем, нужны ли изображения
-        need_images = False
-        if inference_mode == 'model':
-            # Проверяем, есть ли visual пары, которые потребуют инференса моделью
-            pairs = load_all_category_pairs('category_pairs.yaml')
-            visual_pairs = set()
-            if 'visual' in pairs and isinstance(pairs['visual'], list):
-                for pair in pairs['visual']:
-                    if isinstance(pair, list) and len(pair) == 2:
-                        a, b = pair
-                        visual_pairs.add((a, b) if a <= b else (b, a))
-            
-            # Если есть visual пары, то изображения нужны
-            if visual_pairs:
-                need_images = True
-        
-        # Обрабатываем ZIP файлы только если они загружены и нужны
-        if zip_files and need_images:
+        # Обрабатываем ZIP файлы только если они загружены
+        if zip_files:
             for zip_file in zip_files:
                 if not zip_file.filename:
                     continue
@@ -232,12 +214,8 @@ def analyze_files():
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                     zip_ref.extractall(session_dir)
         
-        # Проверяем необходимость ZIP файлов
-        if need_images and not zip_files:
-            return jsonify({'error': 'Для инференса моделью необходимо загрузить ZIP архивы с изображениями!'})
-        
-        # Собираем датасет с учетом необходимости изображений
-        df = collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format=export_format, need_images=need_images)
+        # Собираем датасет
+        df = collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format=export_format)
         
         if df.empty:
             return jsonify({'error': 'Не удалось обработать XML файлы!'})
@@ -266,14 +244,10 @@ def analyze_files():
                     a, b = pair
                     visual_pairs.add((a, b) if a <= b else (b, a))
         
-        # Алгоритм распределяет коллизии согласно новым требованиям
+        # Алгоритм распределяет коллизии
         df['cv_prediction'] = None
         df['cv_confidence'] = None
         df['prediction_source'] = None
-        
-        # Получаем настройки
-        low_confidence = settings.get('low_confidence', 0.3)
-        high_confidence = settings.get('high_confidence', 0.7)
         
         visual_rows = []
         visual_indices = []
@@ -281,77 +255,43 @@ def analyze_files():
         for idx, row in df.iterrows():
             pair = get_pair(row)
             if pair in can_pairs:
-                # can -> Approved
-                df.at[idx, 'cv_prediction'] = 0  # Approved
+                df.at[idx, 'cv_prediction'] = 0  # can
                 df.at[idx, 'cv_confidence'] = 1.0
                 df.at[idx, 'prediction_source'] = 'algorithm'
             elif pair in cannot_pairs:
-                # cannot -> Active
-                df.at[idx, 'cv_prediction'] = 1  # Active
+                df.at[idx, 'cv_prediction'] = 1  # cannot
                 df.at[idx, 'cv_confidence'] = 1.0
                 df.at[idx, 'prediction_source'] = 'algorithm'
             elif pair in visual_pairs:
-                # visual - требует дополнительной обработки
-                df.at[idx, 'cv_prediction'] = -1  # visual (временно)
-                df.at[idx, 'cv_confidence'] = 0.5
-                df.at[idx, 'prediction_source'] = 'algorithm'
-                visual_rows.append(row)
-                visual_indices.append(idx)
-            else:
-                # Неизвестная пара - считаем visual
                 df.at[idx, 'cv_prediction'] = -1  # visual
                 df.at[idx, 'cv_confidence'] = 0.5
                 df.at[idx, 'prediction_source'] = 'algorithm'
                 visual_rows.append(row)
                 visual_indices.append(idx)
-        
-        # Обрабатываем visual коллизии
-        if visual_rows:
-            if inference_mode == 'model':
-                # Используем модель для разметки visual коллизий
-                import torch
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-                visual_df = pd.DataFrame(visual_rows)
-                transform = create_transforms(is_training=False)
-                model = create_model(device)
-                model_path = os.path.join('model', settings.get('model_file', 'model_clashmark.pt'))
-                model.load_state_dict(torch.load(model_path, map_location=device))
-                model.to(device)
-                model.eval()
-                
-                # Используем пороги уверенности из настроек
-                visual_pred_df = predict(model, device, visual_df, transform, 
-                                       low_confidence_threshold=low_confidence, 
-                                       high_confidence_threshold=high_confidence)
-                
-                for i, idx in enumerate(visual_indices):
-                    prediction = int(visual_pred_df.iloc[i]['cv_prediction'])
-                    confidence = float(visual_pred_df.iloc[i]['cv_confidence'])
-                    
-                    if prediction == -1:
-                        # Модель сомневается - оставляем visual
-                        df.at[idx, 'cv_prediction'] = -1  # visual -> Reviewed
-                        df.at[idx, 'cv_confidence'] = confidence
-                        df.at[idx, 'prediction_source'] = 'model_uncertain'
-                    else:
-                        # Модель уверена
-                        df.at[idx, 'cv_prediction'] = prediction  # 0 -> Approved, 1 -> Active
-                        df.at[idx, 'cv_confidence'] = confidence
-                        df.at[idx, 'prediction_source'] = 'model'
-            
-            elif manual_review_enabled:
-                # Режим ручной разметки - оставляем visual для ручной обработки
-                for idx in visual_indices:
-                    df.at[idx, 'cv_prediction'] = -1  # visual -> Reviewed (для ручной разметки)
-                    df.at[idx, 'cv_confidence'] = 0.5
-                    df.at[idx, 'prediction_source'] = 'manual_review'
-            
             else:
-                # Ни модель, ни ручная разметка не используются - все visual -> Reviewed
-                for idx in visual_indices:
-                    df.at[idx, 'cv_prediction'] = -1  # visual -> Reviewed
-                    df.at[idx, 'cv_confidence'] = 0.5
-                    df.at[idx, 'prediction_source'] = 'algorithm'
+                df.at[idx, 'cv_prediction'] = -1  # visual
+                df.at[idx, 'cv_confidence'] = 0.5
+                df.at[idx, 'prediction_source'] = 'algorithm'
+                visual_rows.append(idx)
+                visual_indices.append(idx)
+        
+        # Модель обрабатывает только visual коллизии
+        if visual_rows and settings.get('inference_mode', 'model') == 'model':
+            import torch
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            visual_df = pd.DataFrame(visual_rows)
+            transform = create_transforms(is_training=False)
+            model = create_model(device)
+            model_path = os.path.join('model', settings.get('model_file', 'model_clashmark.pt'))
+            model.load_state_dict(torch.load(model_path, map_location=device))
+            model.to(device)
+            model.eval()
+            visual_pred_df = predict(model, device, visual_df, transform)
+            
+            for i, idx in enumerate(visual_indices):
+                df.at[idx, 'cv_prediction'] = int(visual_pred_df.iloc[i]['cv_prediction'])
+                df.at[idx, 'cv_confidence'] = float(visual_pred_df.iloc[i]['cv_confidence'])
+                df.at[idx, 'prediction_source'] = 'model'
         
         # Экспортируем результаты
         download_links = []
@@ -422,25 +362,24 @@ def analyze_files():
                 # Статистика по файлу
                 total_collisions = len(df_file)
                 found_images = pd.Series(df_file['image_file']).notna().sum() if 'image_file' in df_file.columns else 0
-                approved_count = (df_file['cv_prediction'] == 0).sum()  # can -> Approved
-                active_count = (df_file['cv_prediction'] == 1).sum()    # cannot -> Active
-                reviewed_count = (pd.Series(df_file['cv_prediction']).isna() | (pd.Series(df_file['cv_prediction']) == -1)).sum()  # visual -> Reviewed
+                can_count = (df_file['cv_prediction'] == 0).sum()
+                cannot_count = (df_file['cv_prediction'] == 1).sum()
+                visual_count = (pd.Series(df_file['cv_prediction']).isna() | (pd.Series(df_file['cv_prediction']) == -1)).sum()
                 
                 stats_per_file.append({
                     'file': f'{orig_base_name}.xml',
                     'total_collisions': total_collisions,
                     'found_images': found_images,
-                    'approved_count': approved_count,
-                    'active_count': active_count,
-                    'reviewed_count': reviewed_count
+                    'can_count': can_count,
+                    'cannot_count': cannot_count,
+                    'visual_count': visual_count
                 })
         
         return jsonify(to_py({
             'success': True,
             'session_id': session_id,
             'download_links': download_links,
-            'stats_per_file': stats_per_file,
-            'used_images': need_images
+            'stats_per_file': stats_per_file
         }))
         
     except Exception as e:
@@ -464,40 +403,19 @@ def analyze_preview():
                 xml_path = os.path.join(session_dir, safe_filename)
                 xml_file.save(xml_path)
                 xml_paths.append(xml_path)
-            
-            # Загружаем настройки для определения необходимости изображений
+            zip_paths = []
+            for zip_file in zip_files:
+                if not zip_file.filename:
+                    continue
+                zip_path = os.path.join(session_dir, safe_filename_with_cyrillic(zip_file.filename))
+                zip_file.save(zip_path)
+                zip_paths.append(zip_path)
+            for zip_path in zip_paths:
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(session_dir)
+            # Загружаем настройки для определения формата экспорта
             settings = load_settings()
             export_format = settings.get('export_format', 'standard')
-            inference_mode = settings.get('inference_mode', 'model')
-            
-            # Определяем, нужны ли изображения для предпросмотра
-            need_images = False
-            if inference_mode == 'model':
-                # Проверяем, есть ли visual пары, которые потребуют инференса моделью
-                pairs = load_all_category_pairs('category_pairs.yaml')
-                visual_pairs = set()
-                if 'visual' in pairs and isinstance(pairs['visual'], list):
-                    for pair in pairs['visual']:
-                        if isinstance(pair, list) and len(pair) == 2:
-                            a, b = pair
-                            visual_pairs.add((a, b) if a <= b else (b, a))
-                
-                # Если есть visual пары, то изображения нужны
-                if visual_pairs:
-                    need_images = True
-            
-            # Обрабатываем ZIP файлы только если они нужны
-            zip_paths = []
-            if need_images:
-                for zip_file in zip_files:
-                    if not zip_file.filename:
-                        continue
-                    zip_path = os.path.join(session_dir, safe_filename_with_cyrillic(zip_file.filename))
-                    zip_file.save(zip_path)
-                    zip_paths.append(zip_path)
-                for zip_path in zip_paths:
-                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                        zip_ref.extractall(session_dir)
             from collections import Counter
             all_dfs = []
             for xml_path in xml_paths:
@@ -518,7 +436,7 @@ def analyze_preview():
                 image_count = 0
             stats = {
                 'xml_file_count': len(xml_files),
-                'zip_file_count': len(zip_paths) if need_images else 0,
+                'zip_file_count': len(zip_files),
                 'total_collisions': len(df),
                 'image_count': image_count,
                 'category_pairs': pairs_with_counts
@@ -695,7 +613,7 @@ def api_train():
         xml_path_name_pairs = [(path, os.path.basename(path)) for path in xml_paths]
         settings = load_settings()
         export_format = settings.get('export_format', 'standard')
-        df = collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format=export_format, need_images=True)
+        df = collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format=export_format)
         
         if df.empty:
             return jsonify({'error': 'Не удалось обработать XML файлы!'})

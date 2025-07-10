@@ -320,7 +320,7 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
     
     // Показываем индикатор загрузки
     analyzeBtn.disabled = true;
-    analyzeBtn.innerHTML = 'Анализ выполняется...';
+    analyzeBtn.innerHTML = '<span class="loading"></span> Анализ выполняется...';
     loadingIndicator.style.display = 'block';
     results.style.display = 'none';
     errorContainer.style.display = 'none';
@@ -337,61 +337,26 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
             errorContainer.innerHTML = `<span class="icon">⚠️</span> ${data.error}`;
             errorContainer.style.display = 'block';
         } else {
-            // Отображаем суммарную статистику
+            // Отображаем статистику
             const statsContainer = document.getElementById('statsContainer');
             let statsHtml = '<div class="stats-grid">';
             
-            // Вычисляем суммарные значения
-            let totalCollisions = 0;
-            let totalFoundImages = 0;
-            let totalApproved = 0;
-            let totalActive = 0;
-            let totalReviewed = 0;
-            
             data.stats_per_file.forEach(stat => {
-                totalCollisions += stat.total_collisions || 0;
-                totalFoundImages += stat.found_images || 0;
-                totalApproved += stat.approved_count || 0;
-                totalActive += stat.active_count || 0;
-                totalReviewed += stat.reviewed_count || 0;
-            });
-            
-            // Отображаем суммарную статистику
-            statsHtml += `
-                <div class="stat-item">
-                    <div class="stat-label">XML файлов</div>
-                    <div class="stat-value">${data.stats_per_file.length}</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-label">Всего коллизий</div>
-                    <div class="stat-value">${totalCollisions}</div>
-                </div>
-            `;
-            
-            // Показываем "Найдено изображений" только если работали с изображениями
-            if (data.used_images) {
                 statsHtml += `
                     <div class="stat-item">
+                        <div class="stat-label">Файл</div>
+                        <div class="stat-value">${stat.file}</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Всего коллизий</div>
+                        <div class="stat-value">${stat.total_collisions}</div>
+                    </div>
+                    <div class="stat-item">
                         <div class="stat-label">Найдено изображений</div>
-                        <div class="stat-value">${totalFoundImages}</div>
+                        <div class="stat-value">${stat.found_images}</div>
                     </div>
                 `;
-            }
-            
-            statsHtml += `
-                <div class="stat-item">
-                    <div class="stat-label">Approved</div>
-                    <div class="stat-value">${totalApproved}</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-label">Active</div>
-                    <div class="stat-value">${totalActive}</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-label">Reviewed</div>
-                    <div class="stat-value">${totalReviewed}</div>
-                </div>
-            `;
+            });
             
             statsHtml += '</div>';
             statsContainer.innerHTML = statsHtml;

@@ -406,7 +406,7 @@ document.getElementById('trainForm').addEventListener('submit', async function(e
     
     // Показываем индикатор загрузки
     trainBtn.disabled = true;
-    trainBtn.innerHTML = 'Обучение выполняется...';
+    trainBtn.innerHTML = '<span class="loading"></span> Обучение выполняется...';
     loadingIndicator.style.display = 'block';
     results.style.display = 'none';
     errorContainer.style.display = 'none';
