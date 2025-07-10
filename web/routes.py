@@ -434,7 +434,7 @@ def analyze_files():
         manual_review_collisions = []
         if manual_review_enabled:
             for _, row in df.iterrows():
-                if row.get('cv_prediction') == -1 and row.get('prediction_source') == 'manual_review':
+                if row.get('cv_prediction') == -1:
                     manual_review_collisions.append({
                         'clash_id': row.get('clash_id', ''),
                         'image_file': row.get('image_file', ''),
