@@ -23,6 +23,7 @@ def get_pair(row):
     cat2 = str(row.get('element2_category', '')).strip()
     return (cat1, cat2) if cat1 <= cat2 else (cat2, cat1)
 
+# get_pair и парсинг XML используются для определения класса (can/cannot/visual) согласно алгоритму анализа
 def parse_xml_data(xml_path, export_format='standard'):
     """
     Парсит XML-файл и возвращает DataFrame с коллизиями (универсально для bimstep и стандартного формата)

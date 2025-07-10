@@ -51,20 +51,118 @@ def handle_inference_request():
             df = collect_dataset_from_multiple_files(xml_paths, images_dir=images_dir, export_format=export_format)
             if len(df) == 0:
                 df = collect_dataset_from_multiple_files(xml_paths, images_dir=temp_dir, export_format=export_format)
-            
             if len(df) == 0:
                 cleanup_temp_dir(temp_dir)
                 return render_template('index.html', error='Не найдено изображений для анализа. Проверьте, что имена файлов в XML совпадают с именами изображений в архиве, и что архив содержит папку BSImages или изображения в корне.')
-            
+            # --- Новый блок: обработка пар категорий ---
+            import pandas as pd
+            from core.xml_utils import load_all_category_pairs, get_pair
+            pairs = load_all_category_pairs('category_pairs.yaml')
+            can_pairs = set()
+            cannot_pairs = set()
+            visual_pairs = set()
+            if 'can' in pairs and isinstance(pairs['can'], list):
+                for pair in pairs['can']:
+                    if isinstance(pair, list) and len(pair) == 2:
+                        a, b = pair
+                        can_pairs.add((a, b) if a <= b else (b, a))
+            if 'cannot' in pairs and isinstance(pairs['cannot'], list):
+                for pair in pairs['cannot']:
+                    if isinstance(pair, list) and len(pair) == 2:
+                        a, b = pair
+                        cannot_pairs.add((a, b) if a <= b else (b, a))
+            if 'visual' in pairs and isinstance(pairs['visual'], list):
+                for pair in pairs['visual']:
+                    if isinstance(pair, list) and len(pair) == 2:
+                        a, b = pair
+                        visual_pairs.add((a, b) if a <= b else (b, a))
+            # Получаем настройки
+            inference_mode = settings.get('inference_mode', 'model')
+            manual_review_enabled = settings.get('manual_review_enabled', False)
+            low_confidence = settings.get('low_confidence', 0.3)
+            high_confidence = settings.get('high_confidence', 0.7)
+            # Классификация
+            df['cv_prediction'] = None
+            df['cv_confidence'] = None
+            df['prediction_source'] = None
+            df['cv_status'] = None
+            visual_rows = []
+            visual_indices = []
+            for idx, row in df.iterrows():
+                pair = get_pair(row)
+                if pair in can_pairs:
+                    df.at[idx, 'cv_prediction'] = 0
+                    df.at[idx, 'cv_confidence'] = 1.0
+                    df.at[idx, 'prediction_source'] = 'algorithm'
+                    df.at[idx, 'cv_status'] = 'Approved'
+                elif pair in cannot_pairs:
+                    df.at[idx, 'cv_prediction'] = 1
+                    df.at[idx, 'cv_confidence'] = 1.0
+                    df.at[idx, 'prediction_source'] = 'algorithm'
+                    df.at[idx, 'cv_status'] = 'Active'
+                elif pair in visual_pairs:
+                    df.at[idx, 'cv_prediction'] = -1
+                    df.at[idx, 'cv_confidence'] = 0.5
+                    df.at[idx, 'prediction_source'] = 'algorithm'
+                    df.at[idx, 'cv_status'] = 'Reviewed'
+                    visual_rows.append(row)
+                    visual_indices.append(idx)
+                else:
+                    df.at[idx, 'cv_prediction'] = -1
+                    df.at[idx, 'cv_confidence'] = 0.5
+                    df.at[idx, 'prediction_source'] = 'algorithm'
+                    df.at[idx, 'cv_status'] = 'Reviewed'
+                    visual_rows.append(row)
+                    visual_indices.append(idx)
+            # Обработка visual
+            if visual_rows:
+                if inference_mode == 'model':
+                    import torch
+                    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                    visual_df = pd.DataFrame(visual_rows)
+                    transform = create_transforms(is_training=False)
+                    model = create_model(device)
+                    model_path = os.path.join('model', settings.get('model_file', 'model_clashmark.pt'))
+                    model.load_state_dict(torch.load(model_path, map_location=device))
+                    model.to(device)
+                    model.eval()
+                    from ml.inference import predict
+                    visual_pred_df = predict(model, device, visual_df, transform, 
+                                           low_confidence_threshold=low_confidence, 
+                                           high_confidence_threshold=high_confidence)
+                    for i, idx in enumerate(visual_indices):
+                        prediction = int(visual_pred_df.iloc[i]['cv_prediction'])
+                        confidence = float(visual_pred_df.iloc[i]['cv_confidence'])
+                        if prediction == -1:
+                            df.at[idx, 'cv_prediction'] = -1
+                            df.at[idx, 'cv_confidence'] = confidence
+                            df.at[idx, 'prediction_source'] = 'model_uncertain'
+                            df.at[idx, 'cv_status'] = 'Reviewed'
+                        else:
+                            df.at[idx, 'cv_prediction'] = prediction
+                            df.at[idx, 'cv_confidence'] = confidence
+                            df.at[idx, 'prediction_source'] = 'model'
+                            df.at[idx, 'cv_status'] = 'Approved' if prediction == 0 else 'Active'
+                elif manual_review_enabled:
+                    for idx in visual_indices:
+                        df.at[idx, 'cv_prediction'] = -1
+                        df.at[idx, 'cv_confidence'] = 0.5
+                        df.at[idx, 'prediction_source'] = 'manual_review'
+                        df.at[idx, 'cv_status'] = 'Reviewed'
+                else:
+                    for idx in visual_indices:
+                        df.at[idx, 'cv_prediction'] = -1
+                        df.at[idx, 'cv_confidence'] = 0.5
+                        df.at[idx, 'prediction_source'] = 'algorithm'
+                        df.at[idx, 'cv_status'] = 'Reviewed'
+            # --- Конец нового блока ---
             # Загружаем модель
             device = 'cpu'
             model = create_model(device)
             transform = create_transforms(is_training=False)
-            
             # Получаем пороги уверенности из настроек
             low_confidence = settings.get('low_confidence', 0.3)
             high_confidence = settings.get('high_confidence', 0.7)
-            
             df_pred = predict(model, device, df, transform, 
                            low_confidence_threshold=low_confidence, 
                            high_confidence_threshold=high_confidence)

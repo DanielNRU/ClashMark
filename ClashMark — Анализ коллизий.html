@@ -1,6 +1,27 @@
-{% extends 'base.html' %}
-{% block title %}ClashMark — Анализ коллизий{% endblock %}
-{% block content %}
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>ClashMark — Анализ коллизий</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" type="image/png" href="/static/logo.png">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <header class="main-header">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 64px;">
+            <div class="header-left">
+                <a href="/" class="logo-link"><img src="/static/logo.png" alt="logo" class="logo"></a>
+            </div>
+            <nav class="header-nav">
+                <a href="/" class="nav-link active">Главная</a>
+                <a href="/settings" class="nav-link ">Настройки</a>
+                <a href="/train" class="nav-link ">Обучение</a>
+            </nav>
+        </div>
+    </header>
+    <main class="main-content">
+        
 <div class="page-title">
     Анализ коллизий
     <span class="info-icon" onclick="showInfo()" title="Информация о странице">ℹ️</span>
@@ -337,20 +358,34 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
             errorContainer.innerHTML = `<span class="icon">⚠️</span> ${data.error}`;
             errorContainer.style.display = 'block';
         } else {
-            // Отображаем итоговую статистику по всем файлам
+            // Отображаем статистику
             const statsContainer = document.getElementById('statsContainer');
-            const stats = data.stats_total || {};
-            let statsHtml = `<div class="stats-grid">
-                <div class="stat-item"><div class="stat-label">Файлов</div><div class="stat-value">${stats.total_files ?? '-'}</div></div>
-                <div class="stat-item"><div class="stat-label">Всего коллизий</div><div class="stat-value">${stats.total_collisions ?? '-'}</div></div>
-                <div class="stat-item"><div class="stat-label">Approved</div><div class="stat-value">${stats.total_approved ?? '-'}</div></div>
-                <div class="stat-item"><div class="stat-label">Active</div><div class="stat-value">${stats.total_active ?? '-'}</div></div>
-                <div class="stat-item"><div class="stat-label">Reviewed</div><div class="stat-value">${stats.total_reviewed ?? '-'}</div></div>
-            </div>`;
+            let statsHtml = '<div class="stats-grid">';
+            
+            data.stats_per_file.forEach(stat => {
+                statsHtml += `
+                    <div class="stat-item">
+                        <div class="stat-label">Файл</div>
+                        <div class="stat-value">${stat.file}</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Всего коллизий</div>
+                        <div class="stat-value">${stat.total_collisions}</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Найдено изображений</div>
+                        <div class="stat-value">${stat.found_images}</div>
+                    </div>
+                `;
+            });
+            
+            statsHtml += '</div>';
             statsContainer.innerHTML = statsHtml;
+            
             // Отображаем ссылки для скачивания
             const downloadContainer = document.getElementById('downloadContainer');
             let downloadHtml = '<h4>📥 Скачать результаты:</h4><div class="download-links">';
+            
             data.download_links.forEach(link => {
                 downloadHtml += `
                     <a href="${link.url}" class="download-link">
@@ -359,8 +394,10 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
                     </a>
                 `;
             });
+            
             downloadHtml += '</div>';
             downloadContainer.innerHTML = downloadHtml;
+            
             results.style.display = 'block';
         }
         
@@ -436,4 +473,8 @@ document.getElementById('categoryPairsSearch').addEventListener('input', functio
     showCategoryPairsTable(window.categoryPairsData);
 });
 </script>
-{% endblock %} 
+
+    </main>
+    <script src="/static/scripts.js"></script>
+</body>
+</html> 

@@ -41,7 +41,7 @@ class CollisionImageDataset(Dataset):
         elif 'IsResolved' in row:
             label = row['IsResolved']
         else:
-            label = -1
+            label = -1  # -1 используется для visual/Reviewed
         try:
             label = float(label)
         except Exception:

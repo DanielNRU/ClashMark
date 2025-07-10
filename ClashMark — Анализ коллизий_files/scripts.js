@@ -289,15 +289,25 @@ async function updatePreviewStatsTrainPage() {
             window.categoryPairsData = [];
             renderCategoryPairsTable(window.categoryPairsData);
         } else {
-            // Итоговая строка по всем файлам (используем stats_total)
+            // Итоговая строка по всем файлам
             const statsContainer = document.getElementById('statsContainer');
-            const stats = data.stats_total || {};
+            let totalFiles = data.stats_per_file.length;
+            let totalCollisions = 0;
+            let totalApproved = 0;
+            let totalActive = 0;
+            let totalReviewed = 0;
+            data.stats_per_file.forEach(stat => {
+                totalCollisions += stat.total_collisions || 0;
+                totalApproved += stat.approved_count || 0;
+                totalActive += stat.active_count || 0;
+                totalReviewed += stat.reviewed_count || 0;
+            });
             let statsHtml = `<div class="stats-grid">
-                <div class="stat-item"><div class="stat-label">Файлов</div><div class="stat-value">${stats.total_files ?? '-'}</div></div>
-                <div class="stat-item"><div class="stat-label">Всего коллизий</div><div class="stat-value">${stats.total_collisions ?? '-'}</div></div>
-                <div class="stat-item"><div class="stat-label">Approved</div><div class="stat-value">${stats.total_approved ?? '-'}</div></div>
-                <div class="stat-item"><div class="stat-label">Active</div><div class="stat-value">${stats.total_active ?? '-'}</div></div>
-                <div class="stat-item"><div class="stat-label">Reviewed</div><div class="stat-value">${stats.total_reviewed ?? '-'}</div></div>
+                <div class="stat-item"><div class="stat-label">Файлов</div><div class="stat-value">${totalFiles}</div></div>
+                <div class="stat-item"><div class="stat-label">Всего коллизий</div><div class="stat-value">${totalCollisions}</div></div>
+                <div class="stat-item"><div class="stat-label">Approved</div><div class="stat-value">${totalApproved}</div></div>
+                <div class="stat-item"><div class="stat-label">Active</div><div class="stat-value">${totalActive}</div></div>
+                <div class="stat-item"><div class="stat-label">Reviewed</div><div class="stat-value">${totalReviewed}</div></div>
             </div>`;
             statsContainer.innerHTML = statsHtml;
             // Ссылки для скачивания
