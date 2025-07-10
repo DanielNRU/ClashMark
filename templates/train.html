@@ -53,6 +53,7 @@
                 🚀 Начать обучение
             </button>
         </div>
+        <div id="errorContainer" style="display: none;" class="error-block"></div>
     </form>
     
     <!-- Индикатор загрузки -->
@@ -78,7 +79,6 @@
     <div id="categoryPairsList"></div>
 </div>
 
-    <div id="errorContainer" style="display: none;" class="error-block"></div>
 </div>
 
 <!-- Модальное окно для информации -->
@@ -394,106 +394,6 @@ function showInfo() {
 function closeInfo() {
     document.getElementById('infoModal').style.display = 'none';
 }
-
-document.getElementById('trainForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    
-    const formData = new FormData(this);
-    const trainBtn = document.getElementById('trainBtn');
-    const loadingIndicator = document.getElementById('loadingIndicator');
-    const results = document.getElementById('results');
-    const errorContainer = document.getElementById('errorContainer');
-    
-    // Показываем индикатор загрузки
-    trainBtn.disabled = true;
-    trainBtn.innerHTML = '<span class="loading"></span> Обучение выполняется...';
-    loadingIndicator.style.display = 'block';
-    results.style.display = 'none';
-    errorContainer.style.display = 'none';
-    
-    try {
-        const response = await fetch('/api/train', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (data.error) {
-            errorContainer.innerHTML = `<span class="icon">⚠️</span> ${data.error}`;
-            errorContainer.style.display = 'block';
-        } else {
-            // Отображаем статистику
-            const statsContainer = document.getElementById('statsContainer');
-            let statsHtml = '<div class="stats-grid">';
-            
-            statsHtml += `
-                <div class="stat-item">
-                    <div class="stat-label">Модель</div>
-                    <div class="stat-value">${data.model_file}</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-label">Эпох</div>
-                    <div class="stat-value">${formData.get('epochs')}</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-label">Batch Size</div>
-                    <div class="stat-value">${formData.get('batch_size')}</div>
-                </div>
-            `;
-            
-            if (data.metrics) {
-                statsHtml += `
-                    <div class="stat-item">
-                        <div class="stat-label">Final Accuracy</div>
-                        <div class="stat-value">${(data.metrics.final_accuracy * 100).toFixed(1)}%</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-label">Final F1</div>
-                        <div class="stat-value">${(data.metrics.final_f1 * 100).toFixed(1)}%</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-label">Final Precision</div>
-                        <div class="stat-value">${(data.metrics.final_precision * 100).toFixed(1)}%</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-label">Final Recall</div>
-                        <div class="stat-value">${(data.metrics.final_recall * 100).toFixed(1)}%</div>
-                    </div>
-                `;
-            }
-            
-            statsHtml += '</div>';
-            statsContainer.innerHTML = statsHtml;
-            
-            // Показываем прогресс обучения
-            const trainProgress = document.getElementById('trainProgress');
-            trainProgress.innerHTML = `
-                <div class="progress-info">
-                    <div>Обучение завершено успешно!</div>
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: 100%"></div>
-                    </div>
-                    <div class="progress-text">
-                        <span>Эпоха: ${formData.get('epochs')}/${formData.get('epochs')}</span>
-                        <span>Статус: Завершено</span>
-                    </div>
-                </div>
-            `;
-            
-            results.style.display = 'block';
-        }
-        
-    } catch (error) {
-        errorContainer.innerHTML = `<span class="icon">⚠️</span> Ошибка сети: ${error.message}`;
-        errorContainer.style.display = 'block';
-    } finally {
-        // Скрываем индикатор загрузки
-        trainBtn.disabled = false;
-        trainBtn.innerHTML = '🚀 Начать обучение';
-        loadingIndicator.style.display = 'none';
-    }
-});
 
 // Drag & Drop функциональность
 function setupDragDrop(dropZoneId, inputName) {

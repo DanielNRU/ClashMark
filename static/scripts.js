@@ -331,3 +331,39 @@ if (searchInput) {
 }
 
 // Логика разметки visual/Reviewed реализована на backend, frontend только отображает результат
+
+document.getElementById('trainForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const trainBtn = document.getElementById('trainBtn');
+    const loadingIndicator = document.getElementById('loadingIndicator');
+    const results = document.getElementById('results');
+    const errorContainer = document.getElementById('errorContainer');
+    // Показываем индикатор загрузки
+    trainBtn.disabled = true;
+    // trainBtn.innerHTML = '<span class="loading"></span> Обучение выполняется...'; // УБРАНО
+    loadingIndicator.style.display = 'block';
+    results.style.display = 'none';
+    errorContainer.style.display = 'none';
+    try {
+        const response = await fetch('/api/train', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (data.error) {
+            errorContainer.innerHTML = `<span class="icon">⚠️</span> ${data.error}`;
+            errorContainer.style.display = 'block';
+        } else {
+            // ... остальной код ...
+        }
+    } catch (error) {
+        errorContainer.innerHTML = `<span class="icon">⚠️</span> Ошибка сети: ${error.message}`;
+        errorContainer.style.display = 'block';
+    } finally {
+        // Скрываем индикатор загрузки
+        trainBtn.disabled = false;
+        // trainBtn.innerHTML = '🚀 Начать обучение'; // УБРАНО
+        loadingIndicator.style.display = 'none';
+    }
+});
