@@ -340,6 +340,7 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
     const loadingIndicator = document.getElementById('loadingIndicator');
     const results = document.getElementById('results');
     const errorContainer = document.getElementById('errorContainer');
+    let analysisInfo = document.getElementById('analysisInfo');
     // Показываем индикатор загрузки
     analyzeBtn.disabled = true;
     analyzeBtn.innerHTML = 'Анализ выполняется...';
@@ -347,18 +348,35 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
     results.style.display = 'none';
     errorContainer.style.display = 'none';
 
-    // --- Новый блок: выводим настройки анализа ---
-    let analysisInfo = document.getElementById('analysisInfo');
-    if (analysisInfo) analysisInfo.textContent = '';
+    // --- Новый блок: выводим настройки анализа сразу ---
+    if (analysisInfo) {
+        // Пробуем взять значения из формы (если есть соответствующие input/select)
+        let mode = 'алгоритм';
+        let manual = 'без ручной разметки';
+        let format = 'стандартный';
+        let model = '';
+        try {
+            const settingsForm = document.getElementById('settingsForm');
+            if (settingsForm) {
+                const infMode = settingsForm.querySelector('select[name="inference_mode"]');
+                if (infMode) mode = infMode.value === 'model' ? 'модель' : 'алгоритм';
+                const manualCheck = settingsForm.querySelector('input[name="manual_review_enabled"]');
+                if (manualCheck) manual = manualCheck.checked ? 'с ручной разметкой' : 'без ручной разметки';
+                const expFormat = settingsForm.querySelector('select[name="export_format"]');
+                if (expFormat) format = expFormat.value === 'bimstep' ? 'BIM Step' : 'стандартный';
+                const modelSel = settingsForm.querySelector('select[name="model_file"]');
+                if (modelSel) model = modelSel.value;
+            }
+        } catch (e) {}
+        analysisInfo.textContent = `В режиме ${mode} ${manual}. Формат экспорта: ${format}${mode === 'модель' ? `, модель: ${model}` : ''}`;
+    }
 
     try {
         const response = await fetch('/analyze', {
             method: 'POST',
             body: formData
         });
-        
         const data = await response.json();
-        
         // --- Новый блок: отображаем настройки анализа ---
         if (data.analysis_settings && analysisInfo) {
             let mode = data.analysis_settings.inference_mode === 'model' ? 'модель' : 'алгоритм';
@@ -369,7 +387,6 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
         } else if (analysisInfo) {
             analysisInfo.textContent = '';
         }
-
         if (data.error) {
             errorContainer.innerHTML = `<span class="icon">⚠️</span> ${data.error}`;
             errorContainer.style.display = 'block';
@@ -384,7 +401,5 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
         analyzeBtn.disabled = false;
         analyzeBtn.innerHTML = '🔍 Начать анализ';
         loadingIndicator.style.display = 'none';
-        // Очищаем analysisInfo
-        // if (analysisInfo) analysisInfo.textContent = ''; // Удалено
     }
 });
