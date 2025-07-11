@@ -379,6 +379,9 @@ def analyze_files():
         download_links = []
         stats_per_file = []
         
+        # Применяем ручную разметку к общему DataFrame для корректного подсчета статистики
+        df_with_manual = apply_manual_review(df, session_dir)
+        
         for i, (xml_path, orig_filename) in enumerate(xml_path_name_pairs):
             orig_base_name = os.path.splitext(orig_filename)[0]
             
@@ -388,10 +391,10 @@ def analyze_files():
                 output_xml = os.path.join(session_dir, f"cv_results_{orig_base_name}.xml")
             
             # Фильтруем данные по файлу
-            df_file = df[df['source_file'] == orig_filename].copy()
+            df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
             
             if not df_file.empty:
-                # Экспортируем результаты
+                # Экспортируем результаты с учетом ручной разметки
                 if export_format == 'bimstep':
                     export_to_bimstep_xml(df_file, output_xml, xml_path)
                     # Добавляем записи в журнал BIM Step
@@ -442,12 +445,11 @@ def analyze_files():
                         download_links.append({'name': 'JournalBimStep.xml', 'url': journal_download_url})
                 
                 # Итоговая статистика по файлу
-                df_file_with_manual = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
-                total_collisions = len(df_file_with_manual)
-                found_images = pd.Series(df_file_with_manual['image_file']).notna().sum() if 'image_file' in df_file_with_manual.columns else 0
-                approved_count = (df_file_with_manual['cv_prediction'] == 0).sum()  # can -> Approved
-                active_count = (df_file_with_manual['cv_prediction'] == 1).sum()    # cannot -> Active
-                reviewed_count = (df_file_with_manual['cv_prediction'] == -1).sum()  # visual -> Reviewed
+                total_collisions = len(df_file)
+                found_images = pd.Series(df_file['image_file']).notna().sum() if 'image_file' in df_file.columns else 0
+                approved_count = (df_file['cv_prediction'] == 0).sum()  # can -> Approved
+                active_count = (df_file['cv_prediction'] == 1).sum()    # cannot -> Active
+                reviewed_count = (df_file['cv_prediction'] == -1).sum()  # visual -> Reviewed
                 stats_per_file.append({
                     'file': f'{orig_base_name}.xml',
                     'total_collisions': total_collisions,
@@ -458,9 +460,6 @@ def analyze_files():
                 })
         
         # После формирования stats_per_file, добавляем stats_total для фронта
-        # Применяем ручную разметку к общему DataFrame для корректного подсчета статистики
-        df_with_manual = apply_manual_review(df, session_dir)
-        
         # Пересчитываем итоговую статистику с учетом ручной разметки
         total_approved = (df_with_manual['cv_prediction'] == 0).sum()
         total_active = (df_with_manual['cv_prediction'] == 1).sum()
