@@ -459,17 +459,42 @@ function markManualReview(status) {
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
-                    alert('Ручная разметка успешно сохранена!');
+                    // Запрашиваем обновленную статистику
+                    return fetch(`/api/updated_stats/${sessionId}`);
                 } else {
-                    alert('Ошибка сохранения разметки: ' + (data.error || 'Неизвестная ошибка'));
+                    throw new Error(data.error || 'Неизвестная ошибка');
                 }
             })
+            .then(r => r.json())
+            .then(updatedStats => {
+                if (updatedStats.error) {
+                    throw new Error(updatedStats.error);
+                }
+                // Обновляем отображение статистики
+                updateStatsDisplay(updatedStats);
+                alert('Ручная разметка успешно сохранена!');
+            })
             .catch(e => {
-                alert('Ошибка сети при сохранении разметки: ' + e.message);
+                alert('Ошибка сохранения разметки: ' + e.message);
             });
         } else {
             alert('Ручная разметка завершена! (session_id не найден)');
         }
+    }
+}
+
+// Функция для обновления отображения статистики
+function updateStatsDisplay(updatedStats) {
+    const statsContainer = document.getElementById('statsContainer');
+    if (statsContainer) {
+        let statsHtml = `<div class="stats-grid">
+            <div class="stat-item"><div class="stat-label">Файлов</div><div class="stat-value">1</div></div>
+            <div class="stat-item"><div class="stat-label">Всего коллизий</div><div class="stat-value">${updatedStats.total_collisions}</div></div>
+            <div class="stat-item"><div class="stat-label">Approved</div><div class="stat-value">${updatedStats.total_approved}</div></div>
+            <div class="stat-item"><div class="stat-label">Active</div><div class="stat-value">${updatedStats.total_active}</div></div>
+            <div class="stat-item"><div class="stat-label">Reviewed</div><div class="stat-value">${updatedStats.total_reviewed}</div></div>
+        </div>`;
+        statsContainer.innerHTML = statsHtml;
     }
 }
 

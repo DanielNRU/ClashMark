@@ -38,6 +38,40 @@ ALLOWED_EXTENSIONS = {'xml', 'zip'}
 # Словарь для хранения соответствий между session_id и путями к временным папкам
 session_dirs = {}
 
+def apply_manual_review(df, session_dir):
+    """Применяет ручную разметку к DataFrame из файла manual_review.json"""
+    review_path = os.path.join(session_dir, 'manual_review.json')
+    if not os.path.exists(review_path):
+        return df
+    
+    try:
+        import json
+        with open(review_path, 'r', encoding='utf-8') as f:
+            reviews = json.load(f)
+        
+        review_map = {r['clash_id']: r['status'] for r in reviews}
+        df_updated = df.copy()
+        
+        for idx, row in df_updated.iterrows():
+            cid = row.get('clash_id')
+            if cid in review_map:
+                status = review_map[cid]
+                if status == 'Approved':
+                    df_updated.at[idx, 'cv_prediction'] = 0
+                    df_updated.at[idx, 'prediction_source'] = 'manual_review'
+                elif status == 'Active':
+                    df_updated.at[idx, 'cv_prediction'] = 1
+                    df_updated.at[idx, 'prediction_source'] = 'manual_review'
+                else:  # Reviewed
+                    df_updated.at[idx, 'cv_prediction'] = -1
+                    df_updated.at[idx, 'prediction_source'] = 'manual_review'
+        
+        logger.info(f"Применена ручная разметка к {len(reviews)} коллизиям")
+        return df_updated
+    except Exception as e:
+        logger.error(f"Ошибка применения ручной разметки: {e}")
+        return df
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -366,7 +400,7 @@ def analyze_files():
                             prediction_source = row.get('prediction_source', '')
                             if prediction_source == 'model':
                                 prediction_type = 'model'
-                            elif prediction_source == 'manual':
+                            elif prediction_source == 'manual_review':
                                 prediction_type = 'manual'
                             else:
                                 prediction_type = 'algorithm'
@@ -408,11 +442,12 @@ def analyze_files():
                         download_links.append({'name': 'JournalBimStep.xml', 'url': journal_download_url})
                 
                 # Итоговая статистика по файлу
-                total_collisions = len(df_file)
-                found_images = pd.Series(df_file['image_file']).notna().sum() if 'image_file' in df_file.columns else 0
-                approved_count = (df_file['cv_prediction'] == 0).sum()  # can -> Approved
-                active_count = (df_file['cv_prediction'] == 1).sum()    # cannot -> Active
-                reviewed_count = (pd.Series(df_file['cv_prediction']).isna() | (pd.Series(df_file['cv_prediction']) == -1)).sum()  # visual -> Reviewed
+                df_file_with_manual = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
+                total_collisions = len(df_file_with_manual)
+                found_images = pd.Series(df_file_with_manual['image_file']).notna().sum() if 'image_file' in df_file_with_manual.columns else 0
+                approved_count = (df_file_with_manual['cv_prediction'] == 0).sum()  # can -> Approved
+                active_count = (df_file_with_manual['cv_prediction'] == 1).sum()    # cannot -> Active
+                reviewed_count = (df_file_with_manual['cv_prediction'] == -1).sum()  # visual -> Reviewed
                 stats_per_file.append({
                     'file': f'{orig_base_name}.xml',
                     'total_collisions': total_collisions,
@@ -423,12 +458,20 @@ def analyze_files():
                 })
         
         # После формирования stats_per_file, добавляем stats_total для фронта
+        # Применяем ручную разметку к общему DataFrame для корректного подсчета статистики
+        df_with_manual = apply_manual_review(df, session_dir)
+        
+        # Пересчитываем итоговую статистику с учетом ручной разметки
+        total_approved = (df_with_manual['cv_prediction'] == 0).sum()
+        total_active = (df_with_manual['cv_prediction'] == 1).sum()
+        total_reviewed = (df_with_manual['cv_prediction'] == -1).sum()
+        
         stats_total = {
             'total_files': len(stats_per_file),
-            'total_collisions': sum(f['total_collisions'] for f in stats_per_file),
-            'total_approved': sum(f['approved_count'] for f in stats_per_file),
-            'total_active': sum(f['active_count'] for f in stats_per_file),
-            'total_reviewed': sum(f['reviewed_count'] for f in stats_per_file)
+            'total_collisions': len(df_with_manual),
+            'total_approved': total_approved,
+            'total_active': total_active,
+            'total_reviewed': total_reviewed
         }
         
         # --- Детальная статистика по типам разметки ---
@@ -436,8 +479,8 @@ def analyze_files():
         for i, (xml_path, orig_filename) in enumerate(xml_path_name_pairs):
             orig_base_name = os.path.splitext(orig_filename)[0]
             
-            # Фильтруем данные по файлу
-            df_file = df[df['source_file'] == orig_filename].copy()
+            # Фильтруем данные по файлу из DataFrame с примененной ручной разметкой
+            df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
             
             if not df_file.empty:
                 # Статистика по алгоритму
@@ -481,6 +524,7 @@ def analyze_files():
         # --- Новый блок: формируем список для ручной разметки ---
         manual_review_collisions = []
         if manual_review_enabled:
+            # Используем исходный DataFrame для формирования списка ручной разметки
             for _, row in df.iterrows():
                 if row.get('cv_prediction') == -1:
                     image_path = row.get('image_file', '')
@@ -695,6 +739,51 @@ def api_manual_review():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/updated_stats/<session_id>', methods=['GET'])
+def api_updated_stats(session_id):
+    """Возвращает обновленную статистику после ручной разметки"""
+    try:
+        session_dir = session_dirs.get(session_id)
+        if not session_dir or not os.path.exists(session_dir):
+            return jsonify({'error': 'Сессия не найдена'}), 404
+        
+        # Находим исходный XML файл
+        orig_xml = None
+        for f in os.listdir(session_dir):
+            if f.endswith('.xml') and not f.startswith(('cv_results_', 'bimstep_results_', 'JournalBimStep')):
+                orig_xml = os.path.join(session_dir, f)
+                break
+        
+        if not orig_xml:
+            return jsonify({'error': 'Исходный XML файл не найден'}), 404
+        
+        # Загружаем настройки
+        settings = load_settings()
+        export_format = settings.get('export_format', 'standard')
+        
+        # Парсим исходные данные
+        df = parse_xml_data(orig_xml, export_format)
+        df['source_file'] = os.path.basename(orig_xml)
+        
+        # Применяем ручную разметку
+        df_with_manual = apply_manual_review(df, session_dir)
+        
+        # Подсчитываем обновленную статистику
+        total_approved = (df_with_manual['cv_prediction'] == 0).sum()
+        total_active = (df_with_manual['cv_prediction'] == 1).sum()
+        total_reviewed = (df_with_manual['cv_prediction'] == -1).sum()
+        
+        updated_stats = {
+            'total_collisions': len(df_with_manual),
+            'total_approved': total_approved,
+            'total_active': total_active,
+            'total_reviewed': total_reviewed
+        }
+        
+        return jsonify(updated_stats)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/download/<session_id>/<path:filename>')
 def download_file(session_id, filename):
     try:
@@ -706,43 +795,7 @@ def download_file(session_id, filename):
             return "Файл не найден", 404
         file_path = os.path.join(session_dir, filename)
         logger.debug(f"DOWNLOAD: file_path={file_path}")
-        # --- Новый блок: если это XML/BIMStep, применяем ручную разметку ---
-        if filename.endswith('.xml') and os.path.exists(file_path):
-            review_path = os.path.join(session_dir, 'manual_review.json')
-            logger.debug(f"DOWNLOAD: review_path={review_path}")
-            if os.path.exists(review_path):
-                import json
-                with open(review_path, 'r', encoding='utf-8') as f:
-                    reviews = json.load(f)
-                from core.xml_utils import parse_xml_data, export_to_xml, export_to_bimstep_xml
-                orig_xml = None
-                for f in os.listdir(session_dir):
-                    if f.endswith('.xml') and not f.startswith(('cv_results_', 'bimstep_results_', 'JournalBimStep')):
-                        orig_xml = os.path.join(session_dir, f)
-                        break
-                logger.debug(f"DOWNLOAD: orig_xml={orig_xml}")
-                if orig_xml:
-                    settings = load_settings()
-                    export_format = settings.get('export_format', 'standard')
-                    df = parse_xml_data(orig_xml, export_format)
-                    review_map = {r['clash_id']: r['status'] for r in reviews}
-                    for idx, row in df.iterrows():
-                        cid = row.get('clash_id')
-                        if cid in review_map:
-                            status = review_map[cid]
-                            if status == 'Approved':
-                                df.at[idx, 'cv_prediction'] = 0
-                                df.at[idx, 'prediction_source'] = 'manual_review'
-                            elif status == 'Active':
-                                df.at[idx, 'cv_prediction'] = 1
-                                df.at[idx, 'prediction_source'] = 'manual_review'
-                            else:
-                                df.at[idx, 'cv_prediction'] = -1
-                                df.at[idx, 'prediction_source'] = 'manual_review'
-                    if filename.startswith('bimstep_results_'):
-                        export_to_bimstep_xml(df, file_path, orig_xml)
-                    else:
-                        export_to_xml(df, file_path, orig_xml)
+        
         if not os.path.exists(file_path):
             logger.debug(f"DOWNLOAD: file_path does not exist: {file_path}")
             return "Файл не найден", 404
