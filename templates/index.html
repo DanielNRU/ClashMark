@@ -78,14 +78,19 @@
     <div id="manualReviewModal" class="manual-review-modal" style="display:none;">
         <div class="manual-review-content">
             <span class="manual-review-close" onclick="closeManualReview()">&times;</span>
-            <div id="manualReviewImageBlock">
+            <div id="manualReviewNav" style="text-align:center;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:16px;">
+                <button id="manualReviewPrev" class="main-btn" style="min-width:44px;" onclick="manualReviewPrev()">&#8592;</button>
+                <span id="manualReviewCounter" style="font-size:15px;color:#23408e;"></span>
+                <button id="manualReviewNext" class="main-btn" style="min-width:44px;" onclick="manualReviewNext()">&#8594;</button>
+            </div>
+            <div id="manualReviewImageBlock" style="text-align:center;">
                 <img id="manualReviewImage" src="" alt="Изображение коллизии" style="max-width:420px;max-height:320px;display:block;margin:0 auto 16px auto;">
             </div>
             <div id="manualReviewInfo" style="margin-bottom:16px;text-align:center;"></div>
             <div style="display:flex;justify-content:center;gap:16px;">
-                <button class="main-btn accent" id="btnApprove" onclick="markManualReview('Approved')">Approved</button>
-                <button class="main-btn accent" id="btnActive" onclick="markManualReview('Active')">Active</button>
-                <button class="main-btn" id="btnReviewed" onclick="markManualReview('Reviewed')">Reviewed</button>
+                <button class="main-btn btn-approved" id="btnApprove" onclick="markManualReview('Approved')">Approved</button>
+                <button class="main-btn btn-active" id="btnActive" onclick="markManualReview('Active')">Active</button>
+                <button class="main-btn btn-reviewed" id="btnReviewed" onclick="markManualReview('Reviewed')">Reviewed</button>
             </div>
         </div>
     </div>
@@ -273,6 +278,12 @@ input[type="file"] {
 .category-pairs-table tr:last-child td {
     border-bottom: none;
 }
+.btn-approved { background: #43a047 !important; color: #fff !important; border: none; }
+.btn-approved:hover { background: #388e3c !important; }
+.btn-active { background: #e53935 !important; color: #fff !important; border: none; }
+.btn-active:hover { background: #b71c1c !important; }
+.btn-reviewed { background: #ff9800 !important; color: #fff !important; border: none; }
+.btn-reviewed:hover { background: #f57c00 !important; }
 </style>
 
 <script>

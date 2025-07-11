@@ -355,6 +355,23 @@ let manualReviewQueue = [];
 let manualReviewIndex = 0;
 let manualReviewResults = [];
 
+// --- Горячие клавиши для ручной разметки ---
+document.addEventListener('keydown', function(e) {
+    const modal = document.getElementById('manualReviewModal');
+    if (!modal || modal.style.display !== 'flex') return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.key === '1') {
+        markManualReview('Approved');
+        e.preventDefault();
+    } else if (e.key === '2') {
+        markManualReview('Active');
+        e.preventDefault();
+    } else if (e.key === '3') {
+        markManualReview('Reviewed');
+        e.preventDefault();
+    }
+});
+
 function showManualReviewModal(collisions) {
     manualReviewQueue = collisions;
     manualReviewIndex = 0;
@@ -371,16 +388,46 @@ function renderManualReviewItem() {
     // Картинка
     const img = document.getElementById('manualReviewImage');
     if (item.image_file) {
-        img.src = item.image_file.startsWith('http') ? item.image_file : `/download/${item.source_file}/${encodeURIComponent(item.image_file.split('/').pop())}`;
+        if (item.session_id && item.image_file) {
+            img.src = `/download/${item.session_id}/${encodeURIComponent(item.image_file)}`;
+        } else if (item.image_file.startsWith('http')) {
+            img.src = item.image_file;
+        } else {
+            img.src = item.image_file;
+        }
         img.style.display = '';
     } else {
         img.src = '';
         img.style.display = 'none';
     }
+    // Счётчик (например, 4/35)
+    const counter = document.getElementById('manualReviewCounter');
+    if (counter) {
+        counter.textContent = `${manualReviewIndex + 1} / ${manualReviewQueue.length}`;
+    }
+    // Кнопки навигации
+    const prevBtn = document.getElementById('manualReviewPrev');
+    const nextBtn = document.getElementById('manualReviewNext');
+    if (prevBtn) prevBtn.disabled = manualReviewIndex === 0;
+    if (nextBtn) nextBtn.disabled = manualReviewIndex === manualReviewQueue.length - 1;
     // Инфо
     document.getElementById('manualReviewInfo').innerHTML =
-        `<b>Категории:</b> ${item.element1_category} — ${item.element2_category}<br>` +
-        (item.description ? `<b>Описание:</b> ${item.description}` : '');
+        `<b>Категории:</b><br><div>${item.element1_category}</div><div>${item.element2_category}</div>` +
+        (item.description ? `<br><b>Описание:</b> ${item.description}` : '');
+}
+
+function manualReviewPrev() {
+    if (manualReviewIndex > 0) {
+        manualReviewIndex--;
+        renderManualReviewItem();
+    }
+}
+
+function manualReviewNext() {
+    if (manualReviewIndex < manualReviewQueue.length - 1) {
+        manualReviewIndex++;
+        renderManualReviewItem();
+    }
 }
 
 function markManualReview(status) {

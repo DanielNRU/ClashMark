@@ -41,7 +41,7 @@ session_dirs = {}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format='standard'):
+def collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format='standard', manual_review_enabled=False):
     """Собирает датасет из XML файлов с учетом временной папки сессии и формата экспорта"""
     all_data = []
     
@@ -57,8 +57,8 @@ def collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_fo
                     df_file[col] = pd.to_numeric(df_file[col], errors='coerce')
             # Добавляем информацию о файле
             df_file['source_file'] = orig_filename
-            # Ищем изображения только если они нужны для инференса моделью
-            need_images = export_format == 'standard'
+            # Ищем изображения если нужен инференс или ручная разметка
+            need_images = (export_format == 'standard') or manual_review_enabled
             if need_images:
                 for idx, row in df_file.iterrows():
                     image_href = row.get('image_href', '')
@@ -224,7 +224,7 @@ def analyze_files():
                     zip_ref.extractall(session_dir)
         
         # Собираем датасет
-        df = collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format=export_format)
+        df = collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format=export_format, manual_review_enabled=manual_review_enabled)
         
         if df.empty:
             return jsonify({'error': 'Не удалось обработать XML файлы!', 'analysis_settings': analysis_settings})
@@ -435,13 +435,24 @@ def analyze_files():
         if manual_review_enabled:
             for _, row in df.iterrows():
                 if row.get('cv_prediction') == -1:
+                    image_path = row.get('image_file', '')
+                    # Получаем относительный путь от session_dir, если image_path абсолютный
+                    if image_path and image_path.startswith(session_dir):
+                        rel_image_path = os.path.relpath(image_path, session_dir)
+                    elif image_path:
+                        rel_image_path = image_path
+                    else:
+                        rel_image_path = ''
+                    # Логгируем для отладки
+                    logger.debug(f"MANUAL_REVIEW: clash_id={row.get('clash_id', '')}, image_file={rel_image_path}")
                     manual_review_collisions.append({
                         'clash_id': row.get('clash_id', ''),
-                        'image_file': row.get('image_file', ''),
+                        'image_file': rel_image_path,
                         'element1_category': row.get('element1_category', ''),
                         'element2_category': row.get('element2_category', ''),
                         'description': row.get('clash_name', ''),
-                        'source_file': row.get('source_file', '')
+                        'source_file': row.get('source_file', ''),
+                        'session_id': session_id
                     })
         return jsonify(to_py({
             'success': True,
@@ -635,35 +646,36 @@ def api_manual_review():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/download/<session_id>/<filename>')
+@app.route('/download/<session_id>/<path:filename>')
 def download_file(session_id, filename):
     try:
+        logger.debug(f"DOWNLOAD: session_id={session_id}, filename={filename}")
         session_dir = session_dirs.get(session_id)
+        logger.debug(f"DOWNLOAD: session_dir={session_dir}")
         if not session_dir or not os.path.exists(session_dir):
+            logger.debug(f"DOWNLOAD: session_dir not found or does not exist")
             return "Файл не найден", 404
         file_path = os.path.join(session_dir, filename)
+        logger.debug(f"DOWNLOAD: file_path={file_path}")
         # --- Новый блок: если это XML/BIMStep, применяем ручную разметку ---
         if filename.endswith('.xml') and os.path.exists(file_path):
-            # Проверяем наличие manual_review.json
             review_path = os.path.join(session_dir, 'manual_review.json')
+            logger.debug(f"DOWNLOAD: review_path={review_path}")
             if os.path.exists(review_path):
                 import json
                 with open(review_path, 'r', encoding='utf-8') as f:
                     reviews = json.load(f)
-                # Загружаем DataFrame из исходного файла (ищем по source_file)
                 from core.xml_utils import parse_xml_data, export_to_xml, export_to_bimstep_xml
-                # Определяем исходный XML (по имени)
                 orig_xml = None
                 for f in os.listdir(session_dir):
                     if f.endswith('.xml') and not f.startswith(('cv_results_', 'bimstep_results_', 'JournalBimStep')):
                         orig_xml = os.path.join(session_dir, f)
                         break
+                logger.debug(f"DOWNLOAD: orig_xml={orig_xml}")
                 if orig_xml:
-                    # Определяем формат экспорта
                     settings = load_settings()
                     export_format = settings.get('export_format', 'standard')
                     df = parse_xml_data(orig_xml, export_format)
-                    # Применяем ручную разметку
                     review_map = {r['clash_id']: r['status'] for r in reviews}
                     for idx, row in df.iterrows():
                         cid = row.get('clash_id')
@@ -678,13 +690,14 @@ def download_file(session_id, filename):
                             else:
                                 df.at[idx, 'cv_prediction'] = -1
                                 df.at[idx, 'prediction_source'] = 'manual_review'
-                    # Переэкспортируем файл
                     if filename.startswith('bimstep_results_'):
                         export_to_bimstep_xml(df, file_path, orig_xml)
                     else:
                         export_to_xml(df, file_path, orig_xml)
         if not os.path.exists(file_path):
+            logger.debug(f"DOWNLOAD: file_path does not exist: {file_path}")
             return "Файл не найден", 404
+        logger.debug(f"DOWNLOAD: sending file {file_path}")
         return send_file(file_path, as_attachment=True, download_name=filename)
     except Exception as e:
         logger.error(f"Ошибка скачивания файла: {e}")
@@ -743,7 +756,8 @@ def api_train():
         xml_path_name_pairs = [(path, os.path.basename(path)) for path in xml_paths]
         settings = load_settings()
         export_format = settings.get('export_format', 'standard')
-        df = collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format=export_format)
+        manual_review_enabled = False # По умолчанию для обучения
+        df = collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format=export_format, manual_review_enabled=manual_review_enabled)
         
         if df.empty:
             return jsonify({'error': 'Не удалось обработать XML файлы!'})

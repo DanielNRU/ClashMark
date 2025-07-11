@@ -1,22 +1,22 @@
-<!doctype html>
-<html lang="ru">
-<head>
-    <meta charset="utf-8">
+<!DOCTYPE html>
+<!-- saved from url=(0022)http://127.0.0.1:5001/ -->
+<html lang="ru"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
     <title>ClashMark — Анализ коллизий</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <link rel="icon" type="image/png" href="/static/logo.png">
+    <link rel="stylesheet" href="./ClashMark — Анализ коллизий_files/style.css">
+    <link rel="icon" type="image/png" href="./ClashMark — Анализ коллизий_files/logo.png">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
     <header class="main-header">
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 64px;">
             <div class="header-left">
-                <a href="/" class="logo-link"><img src="/static/logo.png" alt="logo" class="logo"></a>
+                <a href="http://127.0.0.1:5001/" class="logo-link"><img src="./ClashMark — Анализ коллизий_files/logo.png" alt="logo" class="logo"></a>
             </div>
             <nav class="header-nav">
-                <a href="/" class="nav-link active">Главная</a>
-                <a href="/settings" class="nav-link ">Настройки</a>
-                <a href="/train" class="nav-link ">Обучение</a>
+                <a href="http://127.0.0.1:5001/" class="nav-link active">Главная</a>
+                <a href="http://127.0.0.1:5001/settings" class="nav-link ">Настройки</a>
+                <a href="http://127.0.0.1:5001/train" class="nav-link ">Обучение</a>
             </nav>
         </div>
     </header>
@@ -33,34 +33,32 @@
             <div class="form-group">
                 <label>XML файлы:</label>
                 <div class="file-drop" id="xmlDrop">
-                    <input type="file" name="xml_file" multiple accept=".xml" onchange="handleFileSelect(this, 'xmlFiles')">
+                    <input type="file" name="xml_file" multiple="" accept=".xml" onchange="handleFileSelect(this, &#39;xmlFiles&#39;)">
                     <div class="file-btns">
-                        <button type="button" class="main-btn" onclick="document.querySelector('input[name=xml_file]').click()">
+                        <button type="button" class="main-btn" onclick="document.querySelector(&#39;input[name=xml_file]&#39;).click()">
                             📁 Выбрать XML файлы
                         </button>
                     </div>
-                    <div id="xmlFiles" class="selected-files" style="display: none;"></div>
+                    <div id="xmlFiles" class="selected-files" style="display: block;"><div>📄 ВК со всеми.xml</div></div>
                 </div>
             </div>
             
             <div class="form-group">
                 <label>ZIP архивы с изображениями:</label>
                 <div class="file-drop" id="zipDrop">
-                    <input type="file" name="images_zip" multiple accept=".zip" onchange="handleFileSelect(this, 'zipFiles')">
+                    <input type="file" name="images_zip" multiple="" accept=".zip" onchange="handleFileSelect(this, &#39;zipFiles&#39;)">
                     <div class="file-btns">
-                        <button type="button" class="main-btn" onclick="document.querySelector('input[name=images_zip]').click()">
+                        <button type="button" class="main-btn" onclick="document.querySelector(&#39;input[name=images_zip]&#39;).click()">
                             📦 Выбрать ZIP архивы
                         </button>
                     </div>
-                    <div id="zipFiles" class="selected-files" style="display: none;"></div>
+                    <div id="zipFiles" class="selected-files" style="display: block;"><div>📄 ВК со всеми.zip</div></div>
                 </div>
             </div>
         </div>
         
         <div class="form-row">
-            <button type="submit" class="main-btn accent" id="analyzeBtn">
-                🔍 Начать анализ
-            </button>
+            <button type="submit" class="main-btn accent" id="analyzeBtn">🔍 Начать анализ</button>
         </div>
     </form>
     
@@ -69,6 +67,7 @@
         <div class="loading-spinner"></div>
         <p>Выполняется анализ коллизий...</p>
         <p>Это может занять несколько минут в зависимости от количества файлов.</p>
+        <div id="analysisInfo"></div>
     </div>
     
     <div id="results" style="display: none;">
@@ -78,18 +77,23 @@
     </div>
     
     <!-- Блок предпросмотра статистики -->
-    <div id="analyzeStats" class="stats-block" style="margin: 24px 0;"></div>
+    <div id="analyzeStats" class="stats-block" style="margin: 24px 0px; display: block;"><div class="stats-grid">
+                <div class="stat-item"><div class="stat-label">XML файлов</div><div class="stat-value">1</div></div>
+                <div class="stat-item"><div class="stat-label">ZIP архивов</div><div class="stat-value">1</div></div>
+                <div class="stat-item"><div class="stat-label">Всего коллизий</div><div class="stat-value">1638</div></div>
+                <div class="stat-item"><div class="stat-label">Пар категорий</div><div class="stat-value">88</div></div>
+            </div></div>
     <div class="category-pairs-block">
-        <input type="text" id="categoryPairsSearch" placeholder="Поиск по категориям..." class="form-control" style="margin-bottom:12px;max-width:320px;display:none;">
-        <div id="categoryPairsList"></div>
+        <input type="text" id="categoryPairsSearch" placeholder="Поиск по категориям..." class="form-control" style="margin-bottom: 12px; max-width: 320px;">
+        <div id="categoryPairsList"><table class="category-pairs-table"><thead><tr><th data-col="0" style="cursor: pointer;">Категория 1</th><th data-col="1" style="cursor: pointer;">Категория 2</th><th data-col="2" style="cursor: pointer;">Кол-во</th></tr></thead><tbody><tr><td>Несущая арматура</td><td>Несущая арматура</td><td>520</td></tr><tr><td>Материалы изоляции труб</td><td>Материалы изоляции труб</td><td>111</td></tr><tr><td>Каркас несущий</td><td>Обобщенные модели</td><td>76</td></tr><tr><td>Перекрытия</td><td>Соединения несущих конструкций</td><td>68</td></tr><tr><td>Несущая арматура</td><td>Стены</td><td>63</td></tr><tr><td>Арматура трубопроводов</td><td>Материалы изоляции труб</td><td>57</td></tr><tr><td>Стены</td><td>Трубы</td><td>46</td></tr><tr><td>Несущие колонны</td><td>Фундамент несущей конструкции</td><td>44</td></tr><tr><td>Каркас несущий</td><td>Материалы изоляции воздуховодов</td><td>42</td></tr><tr><td>Соединительные детали трубопроводов</td><td>Трубы</td><td>40</td></tr><tr><td>Несущие колонны</td><td>Перекрытия</td><td>38</td></tr><tr><td>Перекрытия</td><td>Фундамент несущей конструкции</td><td>33</td></tr><tr><td>Стены</td><td>Фундамент несущей конструкции</td><td>30</td></tr><tr><td>Воздуховоды</td><td>Стены</td><td>27</td></tr><tr><td>Арматура трубопроводов</td><td>Соединительные детали трубопроводов</td><td>25</td></tr><tr><td>Арматура трубопроводов</td><td>Трубы</td><td>25</td></tr><tr><td>Несущая арматура</td><td>Перекрытия</td><td>22</td></tr><tr><td>Каркас несущий</td><td>Материалы изоляции труб</td><td>18</td></tr><tr><td>Перекрытия</td><td>Трубы</td><td>18</td></tr><tr><td>Материалы изоляции воздуховодов</td><td>Стены</td><td>17</td></tr><tr><td>Соединения несущих конструкций</td><td>Фундамент несущей конструкции</td><td>16</td></tr><tr><td>Несущие колонны</td><td>Стены</td><td>14</td></tr><tr><td>Соединительные детали трубопроводов</td><td>Стены</td><td>14</td></tr><tr><td>Гибкие трубы</td><td>Соединительные детали трубопроводов</td><td>13</td></tr><tr><td>Перекрытия</td><td>Стены</td><td>13</td></tr><tr><td>Арматура воздуховодов</td><td>Воздуховоды</td><td>12</td></tr><tr><td>Гибкие трубы</td><td>Материалы изоляции труб</td><td>12</td></tr><tr><td>Несущие колонны</td><td>Обобщенные модели</td><td>12</td></tr><tr><td>Материалы изоляции воздуховодов</td><td>Соединительные детали воздуховодов</td><td>11</td></tr><tr><td>Арматура воздуховодов</td><td>Оборудование</td><td>10</td></tr><tr><td>Трубы</td><td>Фундамент несущей конструкции</td><td>10</td></tr><tr><td>Трубы</td><td>Трубы</td><td>9</td></tr><tr><td>Каркас несущий</td><td>Оборудование</td><td>8</td></tr><tr><td>Материалы изоляции труб</td><td>Перекрытия</td><td>8</td></tr><tr><td>Материалы изоляции труб</td><td>Стены</td><td>8</td></tr><tr><td>Несущая арматура</td><td>Фундамент несущей конструкции</td><td>7</td></tr><tr><td>Стены</td><td>Стены</td><td>7</td></tr><tr><td>Арматура воздуховодов</td><td>Стены</td><td>6</td></tr><tr><td>Воздуховоды</td><td>Воздухораспределители</td><td>6</td></tr><tr><td>Воздуховоды</td><td>Каркас несущий</td><td>6</td></tr><tr><td>Несущая арматура</td><td>Трубы</td><td>6</td></tr><tr><td>Соединительные детали трубопроводов</td><td>Соединительные детали трубопроводов</td><td>6</td></tr><tr><td>Арматура воздуховодов</td><td>Материалы изоляции воздуховодов</td><td>5</td></tr><tr><td>Арматура трубопроводов</td><td>Арматура трубопроводов</td><td>5</td></tr><tr><td>Арматура воздуховодов</td><td>Арматура воздуховодов</td><td>4</td></tr><tr><td>Воздуховоды</td><td>Несущие колонны</td><td>4</td></tr><tr><td>Воздухораспределители</td><td>Стены</td><td>4</td></tr><tr><td>Каркас несущий</td><td>Стены</td><td>4</td></tr><tr><td>Материалы изоляции воздуховодов</td><td>Обобщенные модели</td><td>4</td></tr><tr><td>Материалы изоляции труб</td><td>Соединительные детали трубопроводов</td><td>4</td></tr><tr><td>Материалы изоляции труб</td><td>Трубы</td><td>4</td></tr><tr><td>Оборудование</td><td>Оборудование</td><td>4</td></tr><tr><td>Воздухораспределители</td><td>Соединительные детали воздуховодов</td><td>3</td></tr><tr><td>Двери</td><td>Стены</td><td>3</td></tr><tr><td>Перекрытия</td><td>Перекрытия</td><td>3</td></tr><tr><td>Соединительные детали воздуховодов</td><td>Стены</td><td>3</td></tr><tr><td>Арматура воздуховодов</td><td>Каркас несущий</td><td>2</td></tr><tr><td>Арматура воздуховодов</td><td>Крыши</td><td>2</td></tr><tr><td>Воздуховоды</td><td>Перекрытия</td><td>2</td></tr><tr><td>Воздуховоды</td><td>Соединительные детали воздуховодов</td><td>2</td></tr><tr><td>Гибкие трубы</td><td>Каркас несущий</td><td>2</td></tr><tr><td>Гибкие трубы</td><td>Трубы</td><td>2</td></tr><tr><td>Каркас несущий</td><td>Трубы</td><td>2</td></tr><tr><td>Крыши</td><td>Оборудование</td><td>2</td></tr><tr><td>Материалы изоляции труб</td><td>Несущие колонны</td><td>2</td></tr><tr><td>Несущие колонны</td><td>Оборудование</td><td>2</td></tr><tr><td>Несущие колонны</td><td>Соединительные детали воздуховодов</td><td>2</td></tr><tr><td>Обобщенные модели</td><td>Соединительные детали воздуховодов</td><td>2</td></tr><tr><td>Обобщенные модели</td><td>Стены</td><td>2</td></tr><tr><td>Оборудование</td><td>Стены</td><td>2</td></tr><tr><td>Перекрытия</td><td>Соединительные детали трубопроводов</td><td>2</td></tr><tr><td>Сантехнические приборы</td><td>Соединительные детали трубопроводов</td><td>2</td></tr><tr><td>Соединения несущих конструкций</td><td>Стены</td><td>2</td></tr><tr><td>Соединительные детали трубопроводов</td><td>Фундамент несущей конструкции</td><td>2</td></tr><tr><td>Арматура воздуховодов</td><td>Перекрытия</td><td>1</td></tr><tr><td>Воздуховоды</td><td>Крыши</td><td>1</td></tr><tr><td>Воздуховоды</td><td>Материалы изоляции воздуховодов</td><td>1</td></tr><tr><td>Воздуховоды</td><td>Обобщенные модели</td><td>1</td></tr><tr><td>Гибкие трубы</td><td>Гибкие трубы</td><td>1</td></tr><tr><td>Гибкие трубы</td><td>Сантехнические приборы</td><td>1</td></tr><tr><td>Колонны</td><td>Обобщенные модели</td><td>1</td></tr><tr><td>Крыши</td><td>Материалы изоляции воздуховодов</td><td>1</td></tr><tr><td>Материалы изоляции воздуховодов</td><td>Оборудование</td><td>1</td></tr><tr><td>Материалы изоляции воздуховодов</td><td>Перекрытия</td><td>1</td></tr><tr><td>Оборудование</td><td>Соединительные детали трубопроводов</td><td>1</td></tr><tr><td>Оборудование</td><td>Трубы</td><td>1</td></tr><tr><td>Сантехнические приборы</td><td>Стены</td><td>1</td></tr><tr><td>Фундамент несущей конструкции</td><td>Фундамент несущей конструкции</td><td>1</td></tr></tbody></table></div>
     </div>
-    <div id="errorContainer" style="display: none;" class="error-block"></div>
+    <div id="errorContainer" style="display: block;" class="error-block"><span class="icon">⚠️</span> Ошибка сети: Failed to fetch</div>
 </div>
 
 <!-- Модальное окно для информации -->
 <div id="infoModal" class="info-modal" style="display:none;">
   <div class="info-modal-content">
-    <span class="info-modal-close" onclick="closeInfo()">&times;</span>
+    <span class="info-modal-close" onclick="closeInfo()">×</span>
     <div id="infoText"></div>
   </div>
 </div>
@@ -358,34 +362,20 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
             errorContainer.innerHTML = `<span class="icon">⚠️</span> ${data.error}`;
             errorContainer.style.display = 'block';
         } else {
-            // Отображаем статистику
+            // Отображаем итоговую статистику по всем файлам
             const statsContainer = document.getElementById('statsContainer');
-            let statsHtml = '<div class="stats-grid">';
-            
-            data.stats_per_file.forEach(stat => {
-                statsHtml += `
-                    <div class="stat-item">
-                        <div class="stat-label">Файл</div>
-                        <div class="stat-value">${stat.file}</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-label">Всего коллизий</div>
-                        <div class="stat-value">${stat.total_collisions}</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-label">Найдено изображений</div>
-                        <div class="stat-value">${stat.found_images}</div>
-                    </div>
-                `;
-            });
-            
-            statsHtml += '</div>';
+            const stats = data.stats_total || {};
+            let statsHtml = `<div class="stats-grid">
+                <div class="stat-item"><div class="stat-label">Файлов</div><div class="stat-value">${stats.total_files ?? '-'}</div></div>
+                <div class="stat-item"><div class="stat-label">Всего коллизий</div><div class="stat-value">${stats.total_collisions ?? '-'}</div></div>
+                <div class="stat-item"><div class="stat-label">Approved</div><div class="stat-value">${stats.total_approved ?? '-'}</div></div>
+                <div class="stat-item"><div class="stat-label">Active</div><div class="stat-value">${stats.total_active ?? '-'}</div></div>
+                <div class="stat-item"><div class="stat-label">Reviewed</div><div class="stat-value">${stats.total_reviewed ?? '-'}</div></div>
+            </div>`;
             statsContainer.innerHTML = statsHtml;
-            
             // Отображаем ссылки для скачивания
             const downloadContainer = document.getElementById('downloadContainer');
             let downloadHtml = '<h4>📥 Скачать результаты:</h4><div class="download-links">';
-            
             data.download_links.forEach(link => {
                 downloadHtml += `
                     <a href="${link.url}" class="download-link">
@@ -394,10 +384,8 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
                     </a>
                 `;
             });
-            
             downloadHtml += '</div>';
             downloadContainer.innerHTML = downloadHtml;
-            
             results.style.display = 'block';
         }
         
@@ -475,6 +463,6 @@ document.getElementById('categoryPairsSearch').addEventListener('input', functio
 </script>
 
     </main>
-    <script src="/static/scripts.js"></script>
-</body>
-</html> 
+    <script src="./ClashMark — Анализ коллизий_files/scripts.js"></script>
+
+ </body></html>

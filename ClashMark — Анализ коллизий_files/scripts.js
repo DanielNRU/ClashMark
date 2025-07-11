@@ -289,25 +289,15 @@ async function updatePreviewStatsTrainPage() {
             window.categoryPairsData = [];
             renderCategoryPairsTable(window.categoryPairsData);
         } else {
-            // Итоговая строка по всем файлам
+            // Итоговая строка по всем файлам (используем stats_total)
             const statsContainer = document.getElementById('statsContainer');
-            let totalFiles = data.stats_per_file.length;
-            let totalCollisions = 0;
-            let totalApproved = 0;
-            let totalActive = 0;
-            let totalReviewed = 0;
-            data.stats_per_file.forEach(stat => {
-                totalCollisions += stat.total_collisions || 0;
-                totalApproved += stat.approved_count || 0;
-                totalActive += stat.active_count || 0;
-                totalReviewed += stat.reviewed_count || 0;
-            });
+            const stats = data.stats_total || {};
             let statsHtml = `<div class="stats-grid">
-                <div class="stat-item"><div class="stat-label">Файлов</div><div class="stat-value">${totalFiles}</div></div>
-                <div class="stat-item"><div class="stat-label">Всего коллизий</div><div class="stat-value">${totalCollisions}</div></div>
-                <div class="stat-item"><div class="stat-label">Approved</div><div class="stat-value">${totalApproved}</div></div>
-                <div class="stat-item"><div class="stat-label">Active</div><div class="stat-value">${totalActive}</div></div>
-                <div class="stat-item"><div class="stat-label">Reviewed</div><div class="stat-value">${totalReviewed}</div></div>
+                <div class="stat-item"><div class="stat-label">Файлов</div><div class="stat-value">${stats.total_files ?? '-'}</div></div>
+                <div class="stat-item"><div class="stat-label">Всего коллизий</div><div class="stat-value">${stats.total_collisions ?? '-'}</div></div>
+                <div class="stat-item"><div class="stat-label">Approved</div><div class="stat-value">${stats.total_approved ?? '-'}</div></div>
+                <div class="stat-item"><div class="stat-label">Active</div><div class="stat-value">${stats.total_active ?? '-'}</div></div>
+                <div class="stat-item"><div class="stat-label">Reviewed</div><div class="stat-value">${stats.total_reviewed ?? '-'}</div></div>
             </div>`;
             statsContainer.innerHTML = statsHtml;
             // Ссылки для скачивания
@@ -341,3 +331,68 @@ if (searchInput) {
 }
 
 // Логика разметки visual/Reviewed реализована на backend, frontend только отображает результат
+
+document.getElementById('analyzeForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const loadingIndicator = document.getElementById('loadingIndicator');
+    const results = document.getElementById('results');
+    const errorContainer = document.getElementById('errorContainer');
+    // Показываем индикатор загрузки
+    analyzeBtn.disabled = true;
+    analyzeBtn.innerHTML = 'Анализ выполняется...';
+    loadingIndicator.style.display = 'block';
+    results.style.display = 'none';
+    errorContainer.style.display = 'none';
+
+    // --- Новый блок: выводим настройки анализа ---
+    let analysisInfo = document.getElementById('analysisInfo');
+    if (!analysisInfo) {
+        analysisInfo = document.createElement('div');
+        analysisInfo.id = 'analysisInfo';
+        analysisInfo.style.marginTop = '12px';
+        analysisInfo.style.fontSize = '15px';
+        analysisInfo.style.color = '#23408e';
+        loadingIndicator.appendChild(analysisInfo);
+    }
+    analysisInfo.textContent = '';
+
+    try {
+        const response = await fetch('/analyze', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        // --- Новый блок: отображаем настройки анализа ---
+        if (data.analysis_settings) {
+            let mode = data.analysis_settings.inference_mode === 'model' ? 'модель' : 'алгоритм';
+            let manual = data.analysis_settings.manual_review_enabled ? 'с ручной разметкой' : 'без ручной разметки';
+            let format = data.analysis_settings.export_format === 'bimstep' ? 'BIM Step' : 'стандартный';
+            let model = data.analysis_settings.model_file || '';
+            analysisInfo.textContent = `В режиме ${mode} ${manual}. Формат экспорта: ${format}${mode === 'модель' ? `, модель: ${model}` : ''}`;
+        } else {
+            analysisInfo.textContent = '';
+        }
+
+        if (data.error) {
+            errorContainer.innerHTML = `<span class="icon">⚠️</span> ${data.error}`;
+            errorContainer.style.display = 'block';
+        } else {
+            // ... остальной код ...
+        }
+    } catch (error) {
+        errorContainer.innerHTML = `<span class="icon">⚠️</span> Ошибка сети: ${error.message}`;
+        errorContainer.style.display = 'block';
+    } finally {
+        // Скрываем индикатор загрузки
+        analyzeBtn.disabled = false;
+        analyzeBtn.innerHTML = '🔍 Начать анализ';
+        loadingIndicator.style.display = 'none';
+        // Очищаем analysisInfo
+        if (analysisInfo) analysisInfo.textContent = '';
+    }
+});

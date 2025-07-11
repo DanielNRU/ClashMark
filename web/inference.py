@@ -20,7 +20,7 @@ def handle_inference_request():
             temp_dir = tempfile.mkdtemp()
             settings = load_settings()
             export_format = settings.get('export_format', 'standard')
-            
+
             # Сохраняем XML файлы
             xml_paths = []
             for xml_file in xml_files:
@@ -30,7 +30,7 @@ def handle_inference_request():
                 xml_path = os.path.join(temp_dir, safe_name)
                 xml_file.save(xml_path)
                 xml_paths.append(xml_path)
-            
+
             # Сохраняем и распаковываем ZIP файлы
             zip_paths = []
             for zip_file in zip_files:
@@ -40,13 +40,13 @@ def handle_inference_request():
                 zip_path = os.path.join(temp_dir, safe_name)
                 zip_file.save(zip_path)
                 zip_paths.append(zip_path)
-            
+
             # Распаковываем архивы
             images_dir = os.path.join(temp_dir, 'BSImages')
             os.makedirs(images_dir, exist_ok=True)
             unzip_archives(zip_paths, images_dir)
             unzip_archives(zip_paths, temp_dir)
-            
+
             # Собираем датасет (сначала BSImages, потом temp_dir)
             df = collect_dataset_from_multiple_files(xml_paths, images_dir=images_dir, export_format=export_format)
             if len(df) == 0:
@@ -164,23 +164,23 @@ def handle_inference_request():
             low_confidence = settings.get('low_confidence', 0.3)
             high_confidence = settings.get('high_confidence', 0.7)
             df_pred = predict(model, device, df, transform, 
-                           low_confidence_threshold=low_confidence, 
+                low_confidence_threshold=low_confidence,
                            high_confidence_threshold=high_confidence)
-            
+
             # Экспортируем результат
             output_xml = os.path.join(temp_dir, 'cv_results.xml')
             if export_format == 'bimstep':
                 export_to_bimstep_xml(df_pred, output_xml, original_xml_path=xml_paths[0])
             else:
                 export_to_xml(df_pred, output_xml, original_xml_path=xml_paths[0])
-            
+
             return send_file(output_xml, as_attachment=True, download_name='cv_results.xml')
-            
+
         except Exception as e:
             if temp_dir:
                 cleanup_temp_dir(temp_dir)
             return render_template('index.html', error=f'Ошибка инференса: {e}\n{traceback.format_exc()}')
-    
+
     return render_template('index.html')
 
 def process_inference(xml_files, zip_files, settings):

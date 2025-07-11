@@ -28,11 +28,11 @@ def fill_xml_fields(df):
             df_result.at[idx, 'resultstatus'] = 'Проанализировано'
     return df_result
 
-def predict(model, device, df, transform, batch_size=16, confidence_threshold=0.5, low_confidence_threshold=0.3, high_confidence_threshold=0.7):
+def predict(model, device, df, transform, batch_size=16, confidence_threshold=0.5, low_confidence_threshold=0.3, high_confidence_threshold=0.7, session_dir=None):
     import torch
     if isinstance(device, str):
         device = torch.device(device)
-    dataset = CollisionImageDataset(df, transform)
+    dataset = CollisionImageDataset(df, transform, session_dir=session_dir)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
     predictions = []
     confidences = []
@@ -61,15 +61,18 @@ def predict(model, device, df, transform, batch_size=16, confidence_threshold=0.
     return df_result
 
 # --- Сбор датасета из XML и изображений ---
-def collect_dataset_from_multiple_files(xml_paths, images_dir=None, export_format='standard'):
+def collect_dataset_from_multiple_files(xml_paths, session_dir=None, export_format='standard'):
     all_dataframes = []
     for xml_path in xml_paths:
         df = parse_xml_data(xml_path, export_format=export_format)
         if len(df) == 0:
             continue
-        if not images_dir:
+        if not session_dir:
             continue
-        df['image_file'] = df['image_href'].apply(lambda href: find_image_by_name(href, images_dir) if href else None)
+        def robust_find(href):
+            path = find_image_by_name(href, session_dir) if href else None
+            return path
+        df['image_file'] = df['image_href'].apply(robust_find)
         df['source_file'] = os.path.basename(xml_path)
         all_dataframes.append(df)
     if not all_dataframes:
