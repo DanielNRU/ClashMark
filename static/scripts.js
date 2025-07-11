@@ -369,6 +369,12 @@ document.addEventListener('keydown', function(e) {
     } else if (e.key === '3') {
         markManualReview('Reviewed');
         e.preventDefault();
+    } else if (e.key === 'ArrowLeft') {
+        manualReviewPrev();
+        e.preventDefault();
+    } else if (e.key === 'ArrowRight') {
+        manualReviewNext();
+        e.preventDefault();
     }
 });
 
@@ -471,6 +477,67 @@ function closeManualReview() {
     document.getElementById('manualReviewModal').style.display = 'none';
 }
 
+// --- Функция отображения детального анализа ---
+function renderDetailedAnalysis(detailedStats, analysisSettings) {
+    const container = document.getElementById('detailedAnalysis');
+    if (!container) return;
+    
+    let html = '';
+    
+    detailedStats.forEach((fileStats, index) => {
+        html += `<div class="detailed-file-stats">`;
+        html += `<h4>📄 ${fileStats.file_name}</h4>`;
+        html += `<div style="font-size: 14px; color: #666; margin-bottom: 12px;">Всего коллизий: <strong>${fileStats.total_collisions}</strong></div>`;
+        
+        // Разметка алгоритмом (всегда показываем)
+        const algorithm = fileStats.algorithm;
+        const algorithmTotal = algorithm.approved + algorithm.active + algorithm.reviewed;
+        if (algorithmTotal > 0) {
+            html += `<div style="margin-bottom: 12px;">`;
+            html += `<div class="stats-label">🤖 Разметка алгоритмом:</div>`;
+            html += `<div class="stats-row">`;
+            html += `<span class="stats-approved">✅ Approved: ${algorithm.approved}</span>`;
+            html += `<span class="stats-active">❌ Active: ${algorithm.active}</span>`;
+            html += `<span class="stats-reviewed">🔍 Reviewed: ${algorithm.reviewed}</span>`;
+            html += `</div></div>`;
+        }
+        
+        // Разметка моделью (показываем только если используется модель)
+        const model = fileStats.model;
+        const modelTotal = model.approved + model.active + model.reviewed;
+        if (modelTotal > 0 && analysisSettings.inference_mode === 'model') {
+            html += `<div style="margin-bottom: 12px;">`;
+            html += `<div class="stats-label">🧠 Разметка моделью компьютерного зрения:</div>`;
+            html += `<div class="stats-row">`;
+            html += `<span class="stats-approved">✅ Approved: ${model.approved}</span>`;
+            html += `<span class="stats-active">❌ Active: ${model.active}</span>`;
+            html += `<span class="stats-reviewed">🔍 Reviewed: ${model.reviewed}</span>`;
+            html += `</div></div>`;
+        }
+        
+        // Ручная разметка (показываем только если включена)
+        const manual = fileStats.manual;
+        const manualTotal = manual.approved + manual.active + manual.reviewed;
+        if (manualTotal > 0 && analysisSettings.manual_review_enabled) {
+            html += `<div style="margin-bottom: 12px;">`;
+            html += `<div class="stats-label">👤 Ручная разметка:</div>`;
+            html += `<div class="stats-row">`;
+            html += `<span class="stats-approved">✅ Approved: ${manual.approved}</span>`;
+            html += `<span class="stats-active">❌ Active: ${manual.active}</span>`;
+            html += `<span class="stats-reviewed">🔍 Reviewed: ${manual.reviewed}</span>`;
+            html += `</div></div>`;
+        }
+        
+        html += `</div>`;
+    });
+    
+    if (html === '') {
+        html = '<div style="text-align: center; color: #666; padding: 20px;">Нет данных для отображения</div>';
+    }
+    
+    container.innerHTML = html;
+}
+
 // --- Встраиваем запуск ручной разметки после анализа ---
 document.getElementById('analyzeForm').addEventListener('submit', async function(e) {
     e.preventDefault();
@@ -487,7 +554,12 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
     loadingIndicator.style.display = 'block';
     results.style.display = 'none';
     errorContainer.style.display = 'none';
-
+    
+    // Очищаем детальный анализ
+    const detailedAnalysis = document.getElementById('detailedAnalysis');
+    if (detailedAnalysis) {
+        detailedAnalysis.innerHTML = '';
+    }
     // analysisInfo обновляется из настроек до анализа не требуется, т.к. уже обновлено при загрузке
     try {
         const response = await fetch('/analyze', {
@@ -507,6 +579,17 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
             if (data.session_id) window.lastSessionId = data.session_id;
             if (data.manual_review_collisions && Array.isArray(data.manual_review_collisions) && data.manual_review_collisions.length > 0) {
                 showManualReviewModal(data.manual_review_collisions);
+            }
+            
+            // Отображаем детальный анализ
+            if (data.detailed_stats && Array.isArray(data.detailed_stats)) {
+                renderDetailedAnalysis(data.detailed_stats, data.analysis_settings);
+            } else {
+                // Скрываем спойлер, если нет данных
+                const detailedAnalysis = document.getElementById('detailedAnalysis');
+                if (detailedAnalysis) {
+                    detailedAnalysis.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">Нет данных для детального анализа</div>';
+                }
             }
         }
     } catch (error) {

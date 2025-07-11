@@ -430,6 +430,54 @@ def analyze_files():
             'total_active': sum(f['active_count'] for f in stats_per_file),
             'total_reviewed': sum(f['reviewed_count'] for f in stats_per_file)
         }
+        
+        # --- Детальная статистика по типам разметки ---
+        detailed_stats = []
+        for i, (xml_path, orig_filename) in enumerate(xml_path_name_pairs):
+            orig_base_name = os.path.splitext(orig_filename)[0]
+            
+            # Фильтруем данные по файлу
+            df_file = df[df['source_file'] == orig_filename].copy()
+            
+            if not df_file.empty:
+                # Статистика по алгоритму
+                algorithm_approved = len(df_file[(df_file['prediction_source'] == 'algorithm') & (df_file['cv_prediction'] == 0)])
+                algorithm_active = len(df_file[(df_file['prediction_source'] == 'algorithm') & (df_file['cv_prediction'] == 1)])
+                algorithm_reviewed = len(df_file[(df_file['prediction_source'] == 'algorithm') & (df_file['cv_prediction'] == -1)])
+                
+                # Статистика по модели
+                model_approved = len(df_file[(df_file['prediction_source'] == 'model') & (df_file['cv_prediction'] == 0)])
+                model_active = len(df_file[(df_file['prediction_source'] == 'model') & (df_file['cv_prediction'] == 1)])
+                model_reviewed = len(df_file[(df_file['prediction_source'] == 'model') & (df_file['cv_prediction'] == -1)])
+                
+                # Статистика по неопределенным (model_uncertain)
+                uncertain_reviewed = len(df_file[(df_file['prediction_source'] == 'model_uncertain') & (df_file['cv_prediction'] == -1)])
+                
+                # Статистика по ручной разметке
+                manual_approved = len(df_file[(df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 0)])
+                manual_active = len(df_file[(df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 1)])
+                manual_reviewed = len(df_file[(df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == -1)])
+                
+                detailed_stats.append({
+                    'file_name': orig_filename,
+                    'total_collisions': len(df_file),
+                    'algorithm': {
+                        'approved': algorithm_approved,
+                        'active': algorithm_active,
+                        'reviewed': algorithm_reviewed
+                    },
+                    'model': {
+                        'approved': model_approved,
+                        'active': model_active,
+                        'reviewed': model_reviewed + uncertain_reviewed  # model_uncertain тоже считается как модель
+                    },
+                    'manual': {
+                        'approved': manual_approved,
+                        'active': manual_active,
+                        'reviewed': manual_reviewed
+                    }
+                })
+        
         # --- Новый блок: формируем список для ручной разметки ---
         manual_review_collisions = []
         if manual_review_enabled:
@@ -462,7 +510,8 @@ def analyze_files():
             'stats_total': stats_total,
             'used_images': export_format == 'standard',
             'analysis_settings': analysis_settings,
-            'manual_review_collisions': manual_review_collisions
+            'manual_review_collisions': manual_review_collisions,
+            'detailed_stats': detailed_stats
         }))
         
     except Exception as e:
