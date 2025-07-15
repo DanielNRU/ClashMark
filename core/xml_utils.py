@@ -77,6 +77,20 @@ def parse_xml_data(xml_path, export_format='standard'):
                 clash[f'{prefix}_type'] = ''
                 if len(element_cats) > i and element_cats[i] is not None and element_cats[i].text is not None:
                     clash[f'{prefix}_category'] = str(element_cats[i].text)
+            # --- Новый блок: парсим ElementIds ---
+            element_ids = clash_result.find('.//ElementIds')
+            element1_id = ''
+            element2_id = ''
+            if element_ids is not None:
+                ids = element_ids.findall('string')
+                if len(ids) > 0 and ids[0] is not None and ids[0].text is not None:
+                    element1_id = ids[0].text.strip()
+                if len(ids) > 1 and ids[1] is not None and ids[1].text is not None:
+                    element2_id = ids[1].text.strip()
+            clash['element1_id'] = element1_id
+            clash['element2_id'] = element2_id
+            # --- Генерируем clash_uid ---
+            clash['clash_uid'] = f"{min(element1_id, element2_id)}_{max(element1_id, element2_id)}" if element1_id and element2_id else ''
             clashes.append(clash)
     else:
         for clash_result in root.findall('.//clashresult'):
@@ -110,6 +124,26 @@ def parse_xml_data(xml_path, export_format='standard'):
                     clash[f'{prefix}_category'] = path_parts[3] if len(path_parts) > 3 else ''
                     clash[f'{prefix}_family'] = path_parts[4] if len(path_parts) > 4 else ''
                     clash[f'{prefix}_type'] = path_parts[5] if len(path_parts) > 5 else ''
+            # --- Новый блок: парсим ElementIds ---
+            element1_id = ''
+            element2_id = ''
+            for i, prefix in zip([0, 1], ['element1', 'element2']):
+                if len(objs) > i and objs[i] is not None:
+                    obj = objs[i]
+                    # id может быть в атрибуте id или в подэлементе
+                    eid = obj.get('id', '')
+                    if not eid:
+                        id_elem = obj.find('.//id')
+                        if id_elem is not None and id_elem.text is not None:
+                            eid = id_elem.text.strip()
+                    if prefix == 'element1':
+                        element1_id = eid
+                    else:
+                        element2_id = eid
+            clash['element1_id'] = element1_id
+            clash['element2_id'] = element2_id
+            # --- Генерируем clash_uid ---
+            clash['clash_uid'] = f"{min(element1_id, element2_id)}_{max(element1_id, element2_id)}" if element1_id and element2_id else ''
             clashes.append(clash)
     df = pd.DataFrame(clashes)
     return df
@@ -122,7 +156,8 @@ def export_to_xml(df, output_path, original_xml_path=None):
         
         for _, row in df.iterrows():
             clash = ET.SubElement(root, 'Clash')
-            clash.set('id', str(row.get('clash_id', '')))
+            # --- clash_uid как id ---
+            clash.set('id', str(row.get('clash_uid', row.get('clash_id', ''))))
             clash.set('name', str(row.get('clash_name', '')))
             
             # Element1
@@ -240,9 +275,9 @@ def export_to_bimstep_xml(df, output_xml_path, original_xml_path=None):
             tolerance = ET.SubElement(clash, 'tolerance')
             tolerance.text = '0,00328083989501312'
             
-            # NumberClashNwc
+            # NumberClashNwc (оставим для совместимости)
             number_clash = ET.SubElement(clash, 'numberClashNwc')
-            number_clash.text = str(row.get('clash_name', row.get('clash_id', '')))
+            number_clash.text = str(row.get('clash_name', row.get('clash_uid', row.get('clash_id', ''))))
             
             # ImagePath - сохраняем исходные пути к изображениям
             image_path = ET.SubElement(clash, 'imagePath')
@@ -305,7 +340,7 @@ def export_to_bimstep_xml(df, output_xml_path, original_xml_path=None):
         logger.error(f"Ошибка экспорта в BIM Step XML {output_xml_path}: {e}")
         raise
 
-def add_bimstep_journal_entry(clash_id, prediction_type, comment, session_dir=None, element1_id=None, element2_id=None, status=None):
+def add_bimstep_journal_entry(clash_uid, prediction_type, comment, session_dir=None, element1_id=None, element2_id=None, status=None):
     """Добавляет запись в журнал BIM Step с ID объектов и статусом"""
     try:
         if session_dir:
@@ -398,7 +433,7 @@ def add_bimstep_journal_entry(clash_id, prediction_type, comment, session_dir=No
         # Сохраняем журнал
         tree.write(journal_path, encoding='utf-8', xml_declaration=True)
         
-        logger.info(f"Добавлена запись в журнал BIM Step для коллизии {clash_id}")
+        logger.info(f"Добавлена запись в журнал BIM Step для коллизии {clash_uid}")
         
     except Exception as e:
         logger.error(f"Ошибка добавления записи в журнал BIM Step: {e}")

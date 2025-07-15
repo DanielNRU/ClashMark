@@ -61,7 +61,8 @@ def apply_manual_review(df, session_dir):
             if col not in df.columns:
                 logger.error(f"DataFrame не содержит колонку {col}")
                 return df
-        review_map = {r['clash_id']: r['status'] for r in reviews}
+        # --- Заменено: теперь ключ - clash_uid ---
+        review_map = {r['clash_uid']: r['status'] for r in reviews}
         df_updated = df.copy()
         
         # Добавляем колонки для исходных значений, если их нет
@@ -72,11 +73,11 @@ def apply_manual_review(df, session_dir):
         
         applied_count = 0
         for idx, row in df_updated.iterrows():
-            cid = row.get('clash_id')
+            cid = row.get('clash_uid')
             if cid in review_map:
                 status = review_map[cid]
                 applied_count += 1
-                logger.debug(f"Применяем разметку: clash_id={cid}, status={status}")
+                logger.debug(f"Применяем разметку: clash_uid={cid}, status={status}")
                 
                 # Сохраняем исходные значения только если это первая ручная разметка
                 if pd.isna(row.get('original_prediction_source')):
@@ -490,7 +491,7 @@ def analyze_files():
                                 status = 'reviewed'
                             
                             add_bimstep_journal_entry(
-                                row.get('clash_id', ''), 
+                                row.get('clash_uid', ''), 
                                 prediction_type, 
                                 'Разметка с помощью ClashMark', 
                                 session_dir=session_dir,
@@ -612,9 +613,9 @@ def analyze_files():
                     else:
                         rel_image_path = ''
                     # Логгируем для отладки
-                    logger.info(f"MANUAL_REVIEW: clash_id={row.get('clash_id', '')}, image_file={rel_image_path}")
+                    logger.info(f"MANUAL_REVIEW: clash_uid={row.get('clash_uid', '')}, image_file={rel_image_path}")
                     manual_review_collisions.append({
-                        'clash_id': row.get('clash_id', ''),
+                        'clash_uid': row.get('clash_uid', ''),
                         'image_file': rel_image_path,
                         'element1_category': row.get('element1_category', ''),
                         'element2_category': row.get('element2_category', ''),
@@ -824,12 +825,12 @@ def api_manual_review():
             return jsonify({'error': 'Сессия не найдена'}), 404
         # Проверяем каждую разметку
         for i, review in enumerate(reviews):
-            if 'clash_id' not in review or 'status' not in review:
+            if 'clash_uid' not in review or 'status' not in review:
                 logger.error(f"[manual_review] Некорректная разметка в позиции {i}: {review}")
                 return jsonify({'error': f'Некорректная разметка в позиции {i}: {review}'}), 400
         # Логируем первые 5 для отладки
         for review in reviews[:5]:
-            logger.info(f"  clash_id: {review.get('clash_id')}, status: {review.get('status')}")
+            logger.info(f"  clash_uid: {review.get('clash_uid')}, status: {review.get('status')}")
         # Подсчитываем статистику разметки
         status_counts = {}
         for review in reviews:
@@ -847,6 +848,82 @@ def api_manual_review():
             return jsonify({'error': f'Ошибка записи manual_review.json: {e}'}), 500
         logger.info(f"Ручная разметка сохранена в {review_path}")
         logger.info(f"Статистика сохраненной разметки: {status_counts}")
+        # --- Новый блок: применяем ручную разметку, пересчитываем статистику и переэкспортируем XML ---
+        import pandas as pd
+        df_path = os.path.join(session_dir, 'df_with_inference.csv')
+        if os.path.exists(df_path):
+            df_combined = pd.read_csv(df_path)
+            df_with_manual = apply_manual_review(df_combined, session_dir)
+            # value_counts по статусу
+            status_counts = df_with_manual['cv_status'].value_counts().to_dict()
+            # Переэкспорт XML
+            orig_xmls = []
+            for f in os.listdir(session_dir):
+                if f.endswith('.xml') and not f.startswith(('cv_results_', 'bimstep_results_', 'JournalBimStep')):
+                    orig_xmls.append(os.path.join(session_dir, f))
+            settings = load_settings()
+            export_format = settings.get('export_format', 'standard')
+            download_links = []
+            for orig_xml in orig_xmls:
+                orig_filename = os.path.basename(orig_xml)
+                orig_base_name = os.path.splitext(orig_filename)[0]
+                df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
+                if not df_file.empty:
+                    if export_format == 'bimstep':
+                        output_xml = os.path.join(session_dir, f"bimstep_results_{orig_base_name}.xml")
+                        export_to_bimstep_xml(df_file, output_xml, orig_xml)
+                    else:
+                        output_xml = os.path.join(session_dir, f"cv_results_{orig_base_name}.xml")
+                        export_to_xml(df_file, output_xml, orig_xml)
+                    download_url = url_for('download_file', session_id=session_id, filename=os.path.basename(output_xml))
+                    download_links.append({'name': os.path.basename(output_xml), 'url': download_url})
+                    if export_format == 'bimstep':
+                        journal_path = os.path.join(session_dir, 'JournalBimStep.xml')
+                        if os.path.exists(journal_path):
+                            journal_download_url = url_for('download_file', session_id=session_id, filename='JournalBimStep.xml')
+                            download_links.append({'name': 'JournalBimStep.xml', 'url': journal_download_url})
+            # detailed_stats
+            detailed_stats = []
+            for orig_xml in orig_xmls:
+                orig_filename = os.path.basename(orig_xml)
+                df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
+                if not df_file.empty:
+                    pred_source = df_file['original_prediction_source'].combine_first(df_file['prediction_source']) if 'original_prediction_source' in df_file.columns else df_file['prediction_source']
+                    pred_value = df_file['original_cv_prediction'].combine_first(df_file['cv_prediction']) if 'original_cv_prediction' in df_file.columns else df_file['cv_prediction']
+                    algorithm_approved = int(((pred_source == 'algorithm') & (pred_value == 0)).sum())
+                    algorithm_active = int(((pred_source == 'algorithm') & (pred_value == 1)).sum())
+                    algorithm_reviewed = int(((pred_source == 'algorithm') & (pred_value == -1)).sum())
+                    model_mask = pred_source.isin(['model', 'model_uncertain'])
+                    model_approved = int(((model_mask) & (pred_value == 0)).sum())
+                    model_active = int(((model_mask) & (pred_value == 1)).sum())
+                    model_reviewed = int(((model_mask) & (pred_value == -1)).sum())
+                    manual_approved = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 0)).sum())
+                    manual_active = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 1)).sum())
+                    manual_reviewed = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == -1)).sum())
+                    status_counts_file = df_file['cv_status'].value_counts().to_dict()
+                    detailed_stats.append({
+                        'file_name': orig_filename,
+                        'total_collisions': len(df_file),
+                        'algorithm': {
+                            'approved': algorithm_approved,
+                            'active': algorithm_active,
+                            'reviewed': algorithm_reviewed
+                        },
+                        'model': {
+                            'approved': model_approved,
+                            'active': model_active,
+                            'reviewed': model_reviewed
+                        },
+                        'manual': {
+                            'approved': manual_approved,
+                            'active': manual_active,
+                            'reviewed': manual_reviewed
+                        },
+                        'status_counts': status_counts_file
+                    })
+            # Сохраняем актуальный DataFrame
+            df_with_manual.to_csv(df_path, index=False)
+            return jsonify({'success': True, 'status_counts': status_counts, 'download_links': download_links, 'detailed_stats': detailed_stats})
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Ошибка сохранения ручной разметки: {e}")

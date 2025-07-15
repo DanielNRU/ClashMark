@@ -511,7 +511,7 @@ function manualReviewNext() {
 function markManualReview(status) {
     const item = manualReviewQueue[manualReviewIndex];
     manualReviewResults.push({
-        clash_id: item.clash_id,
+        clash_uid: item.clash_uid,
         status: status,
         source_file: item.source_file
     });
@@ -542,8 +542,8 @@ function updateStatsDisplay(updatedStats) {
 }
 
 function closeManualReview() {
-    // Если есть незавершённые результаты — спрашиваем подтверждение
-    if (manualReviewResults.length > 0 && manualReviewResults.length < manualReviewQueue.length) {
+    // Если есть хотя бы один результат разметки — спрашиваем подтверждение
+    if (manualReviewResults.length > 0) {
         showManualReviewConfirmModal();
         return;
     }
