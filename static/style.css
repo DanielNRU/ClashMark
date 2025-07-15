@@ -517,3 +517,9 @@ body {
     font-weight: 700;
     color: #23408e;
 }
+
+.selected-status {
+    outline: 3px solid #23408e !important;
+    box-shadow: 0 0 0 2px #a3b6e6 !important;
+    z-index: 2;
+}

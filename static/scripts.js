@@ -354,6 +354,7 @@ document.addEventListener('DOMContentLoaded', function() {
 let manualReviewQueue = [];
 let manualReviewIndex = 0;
 let manualReviewResults = [];
+let manualReviewStatuses = []; // Новый массив для хранения выбранных статусов
 
 // --- Горячие клавиши для ручной разметки ---
 document.addEventListener('keydown', function(e) {
@@ -382,6 +383,7 @@ function showManualReviewModal(collisions) {
     manualReviewQueue = collisions;
     manualReviewIndex = 0;
     manualReviewResults = [];
+    manualReviewStatuses = new Array(collisions.length).fill(null); // Сброс статусов
     if (manualReviewQueue.length > 0) {
         renderManualReviewItem();
         document.getElementById('manualReviewModal').style.display = 'flex';
@@ -420,6 +422,17 @@ function renderManualReviewItem() {
     document.getElementById('manualReviewInfo').innerHTML =
         `<b>Категории:</b><br><div>${item.element1_category}</div><div>${item.element2_category}</div>` +
         (item.description ? `<br><b>Описание:</b> ${item.description}` : '');
+    // --- Новое: выделение выбранной кнопки ---
+    const status = manualReviewStatuses[manualReviewIndex];
+    const btnApprove = document.getElementById('btnApprove');
+    const btnActive = document.getElementById('btnActive');
+    const btnReviewed = document.getElementById('btnReviewed');
+    [btnApprove, btnActive, btnReviewed].forEach(btn => {
+        if (btn) btn.classList.remove('selected-status');
+    });
+    if (status === 'Approved' && btnApprove) btnApprove.classList.add('selected-status');
+    if (status === 'Active' && btnActive) btnActive.classList.add('selected-status');
+    if (status === 'Reviewed' && btnReviewed) btnReviewed.classList.add('selected-status');
 }
 
 function manualReviewPrev() {
@@ -443,6 +456,7 @@ function markManualReview(status) {
         status: status,
         source_file: item.source_file
     });
+    manualReviewStatuses[manualReviewIndex] = status; // Сохраняем выбранный статус
     manualReviewIndex++;
     if (manualReviewIndex < manualReviewQueue.length) {
         renderManualReviewItem();
