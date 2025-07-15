@@ -519,7 +519,19 @@ body {
 }
 
 .selected-status {
-    outline: 3px solid #23408e !important;
-    box-shadow: 0 0 0 2px #a3b6e6 !important;
-    z-index: 2;
+    outline-width: 3px !important;
+    outline-style: solid !important;
+    outline-offset: 4px !important;
+    border-radius: 12px !important;
+    box-shadow: 0 0 8px 0 rgba(35,64,142,0.10) !important;
+    transition: outline-color 0.2s, box-shadow 0.2s;
+}
+.selected-status.btn-approved {
+    outline-color: #43a047 !important;
+}
+.selected-status.btn-active {
+    outline-color: #e53935 !important;
+}
+.selected-status.btn-reviewed {
+    outline-color: #ff9800 !important;
 }
