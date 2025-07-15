@@ -58,6 +58,13 @@ def predict(model, device, df, transform, batch_size=16, confidence_threshold=0.
     df_result['cv_prediction'] = predictions
     df_result['cv_confidence'] = confidences
     df_result = fill_xml_fields(df_result)
+    # --- Новый блок: добавляем clash_uid, если его нет ---
+    if 'clash_uid' not in df_result.columns and 'element1_id' in df_result.columns and 'element2_id' in df_result.columns:
+        def make_uid(row):
+            id1 = str(row['element1_id']) if pd.notna(row['element1_id']) else ''
+            id2 = str(row['element2_id']) if pd.notna(row['element2_id']) else ''
+            return f"{min(id1, id2)}_{max(id1, id2)}" if id1 and id2 else ''
+        df_result['clash_uid'] = df_result.apply(make_uid, axis=1)
     return df_result
 
 # --- Сбор датасета из XML и изображений ---
