@@ -552,23 +552,22 @@ def analyze_files():
             df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
             
             if not df_file.empty:
+                # Корректно определяем источник и значение предсказания с учётом ручной разметки
+                pred_source = df_file['original_prediction_source'].combine_first(df_file['prediction_source']) if 'original_prediction_source' in df_file.columns else df_file['prediction_source']
+                pred_value = df_file['original_cv_prediction'].combine_first(df_file['cv_prediction']) if 'original_cv_prediction' in df_file.columns else df_file['cv_prediction']
                 # Статистика по алгоритму
-                algorithm_approved = len(df_file[(df_file.get('original_prediction_source', df_file['prediction_source']) == 'algorithm') & (df_file.get('original_cv_prediction', df_file['cv_prediction']) == 0)])
-                algorithm_active = len(df_file[(df_file.get('original_prediction_source', df_file['prediction_source']) == 'algorithm') & (df_file.get('original_cv_prediction', df_file['cv_prediction']) == 1)])
-                algorithm_reviewed = len(df_file[(df_file.get('original_prediction_source', df_file['prediction_source']) == 'algorithm') & (df_file.get('original_cv_prediction', df_file['cv_prediction']) == -1)])
-                
+                algorithm_approved = int(((pred_source == 'algorithm') & (pred_value == 0)).sum())
+                algorithm_active = int(((pred_source == 'algorithm') & (pred_value == 1)).sum())
+                algorithm_reviewed = int(((pred_source == 'algorithm') & (pred_value == -1)).sum())
                 # Статистика по модели
-                model_approved = len(df_file[(df_file.get('original_prediction_source', df_file['prediction_source']).isin(['model', 'model_uncertain'])) & (df_file.get('original_cv_prediction', df_file['cv_prediction']) == 0)])
-                model_active = len(df_file[(df_file.get('original_prediction_source', df_file['prediction_source']).isin(['model', 'model_uncertain'])) & (df_file.get('original_cv_prediction', df_file['cv_prediction']) == 1)])
-                model_reviewed = len(df_file[(df_file.get('original_prediction_source', df_file['prediction_source']).isin(['model', 'model_uncertain'])) & (df_file.get('original_cv_prediction', df_file['cv_prediction']) == -1)])
-                
-                # Статистика по неопределенным (model_uncertain)
-                uncertain_reviewed = len(df_file[(df_file['prediction_source'] == 'model_uncertain') & (df_file['cv_prediction'] == -1)])
-                
+                model_mask = pred_source.isin(['model', 'model_uncertain'])
+                model_approved = int(((model_mask) & (pred_value == 0)).sum())
+                model_active = int(((model_mask) & (pred_value == 1)).sum())
+                model_reviewed = int(((model_mask) & (pred_value == -1)).sum())
                 # Статистика по ручной разметке
-                manual_approved = len(df_file[(df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 0)])
-                manual_active = len(df_file[(df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 1)])
-                manual_reviewed = len(df_file[(df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == -1)])
+                manual_approved = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 0)).sum())
+                manual_active = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 1)).sum())
+                manual_reviewed = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == -1)).sum())
                 
                 # value_counts по статусу
                 status_counts = df_file['cv_status'].value_counts().to_dict()
@@ -584,7 +583,7 @@ def analyze_files():
                     'model': {
                         'approved': model_approved,
                         'active': model_active,
-                        'reviewed': model_reviewed + uncertain_reviewed  # model_uncertain тоже считается как модель
+                        'reviewed': model_reviewed
                     },
                     'manual': {
                         'approved': manual_approved,
@@ -595,7 +594,7 @@ def analyze_files():
                 })
                 
                 # Логируем детальную статистику для этого файла
-                logger.info(f"Детальная статистика для {orig_filename}: Algorithm(A={algorithm_approved},Ac={algorithm_active},R={algorithm_reviewed}), Model(A={model_approved},Ac={model_active},R={model_reviewed + uncertain_reviewed}), Manual(A={manual_approved},Ac={manual_active},R={manual_reviewed})")
+                logger.info(f"Детальная статистика для {orig_filename}: Algorithm(A={algorithm_approved},Ac={algorithm_active},R={algorithm_reviewed}), Model(A={model_approved},Ac={model_active},R={model_reviewed}), Manual(A={manual_approved},Ac={manual_active},R={manual_reviewed})")
         
         # --- Новый блок: формируем список для ручной разметки ---
         manual_review_collisions = []
@@ -905,23 +904,22 @@ def api_updated_stats(session_id):
             df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
             
             if not df_file.empty:
+                # Корректно определяем источник и значение предсказания с учётом ручной разметки
+                pred_source = df_file['original_prediction_source'].combine_first(df_file['prediction_source']) if 'original_prediction_source' in df_file.columns else df_file['prediction_source']
+                pred_value = df_file['original_cv_prediction'].combine_first(df_file['cv_prediction']) if 'original_cv_prediction' in df_file.columns else df_file['cv_prediction']
                 # Статистика по алгоритму
-                algorithm_approved = int(len(df_file[(df_file.get('original_prediction_source', df_file['prediction_source']) == 'algorithm') & (df_file.get('original_cv_prediction', df_file['cv_prediction']) == 0)]))
-                algorithm_active = int(len(df_file[(df_file.get('original_prediction_source', df_file['prediction_source']) == 'algorithm') & (df_file.get('original_cv_prediction', df_file['cv_prediction']) == 1)]))
-                algorithm_reviewed = int(len(df_file[(df_file.get('original_prediction_source', df_file['prediction_source']) == 'algorithm') & (df_file.get('original_cv_prediction', df_file['cv_prediction']) == -1)]))
-                
+                algorithm_approved = int(((pred_source == 'algorithm') & (pred_value == 0)).sum())
+                algorithm_active = int(((pred_source == 'algorithm') & (pred_value == 1)).sum())
+                algorithm_reviewed = int(((pred_source == 'algorithm') & (pred_value == -1)).sum())
                 # Статистика по модели
-                model_approved = int(len(df_file[(df_file.get('original_prediction_source', df_file['prediction_source']).isin(['model', 'model_uncertain'])) & (df_file.get('original_cv_prediction', df_file['cv_prediction']) == 0)]))
-                model_active = int(len(df_file[(df_file.get('original_prediction_source', df_file['prediction_source']).isin(['model', 'model_uncertain'])) & (df_file.get('original_cv_prediction', df_file['cv_prediction']) == 1)]))
-                model_reviewed = int(len(df_file[(df_file.get('original_prediction_source', df_file['prediction_source']).isin(['model', 'model_uncertain'])) & (df_file.get('original_cv_prediction', df_file['cv_prediction']) == -1)]))
-                
-                # Статистика по неопределенным (model_uncertain)
-                uncertain_reviewed = int(len(df_file[(df_file['prediction_source'] == 'model_uncertain') & (df_file['cv_prediction'] == -1)]))
-                
+                model_mask = pred_source.isin(['model', 'model_uncertain'])
+                model_approved = int(((model_mask) & (pred_value == 0)).sum())
+                model_active = int(((model_mask) & (pred_value == 1)).sum())
+                model_reviewed = int(((model_mask) & (pred_value == -1)).sum())
                 # Статистика по ручной разметке
-                manual_approved = int(len(df_file[(df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 0)]))
-                manual_active = int(len(df_file[(df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 1)]))
-                manual_reviewed = int(len(df_file[(df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == -1)]))
+                manual_approved = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 0)).sum())
+                manual_active = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 1)).sum())
+                manual_reviewed = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == -1)).sum())
                 
                 # value_counts по статусу
                 status_counts = df_file['cv_status'].value_counts().to_dict()
@@ -937,7 +935,7 @@ def api_updated_stats(session_id):
                     'model': {
                         'approved': model_approved,
                         'active': model_active,
-                        'reviewed': model_reviewed + uncertain_reviewed
+                        'reviewed': model_reviewed
                     },
                     'manual': {
                         'approved': manual_approved,
