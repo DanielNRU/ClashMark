@@ -570,6 +570,9 @@ def analyze_files():
                 manual_active = len(df_file[(df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 1)])
                 manual_reviewed = len(df_file[(df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == -1)])
                 
+                # value_counts по статусу
+                status_counts = df_file['cv_status'].value_counts().to_dict()
+                
                 detailed_stats.append({
                     'file_name': orig_filename,
                     'total_collisions': len(df_file),
@@ -587,7 +590,8 @@ def analyze_files():
                         'approved': manual_approved,
                         'active': manual_active,
                         'reviewed': manual_reviewed
-                    }
+                    },
+                    'status_counts': status_counts
                 })
                 
                 # Логируем детальную статистику для этого файла
@@ -919,6 +923,9 @@ def api_updated_stats(session_id):
                 manual_active = int(len(df_file[(df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 1)]))
                 manual_reviewed = int(len(df_file[(df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == -1)]))
                 
+                # value_counts по статусу
+                status_counts = df_file['cv_status'].value_counts().to_dict()
+                
                 detailed_stats.append({
                     'file_name': orig_filename,
                     'total_collisions': int(len(df_file)),
@@ -936,7 +943,8 @@ def api_updated_stats(session_id):
                         'approved': manual_approved,
                         'active': manual_active,
                         'reviewed': manual_reviewed
-                    }
+                    },
+                    'status_counts': status_counts
                 })
         
         # Создаем полный ответ с детальной статистикой
