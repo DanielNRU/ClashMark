@@ -104,6 +104,17 @@
             </div>
         </div>
     </div>
+    <!-- Модальное окно подтверждения завершения ручной разметки -->
+    <div id="manualReviewConfirmModal" class="info-modal" style="display:none; z-index: 11000;">
+      <div class="info-modal-content">
+        <div style="font-size:17px; font-weight:600; margin-bottom:16px;">Завершить ручную разметку?</div>
+        <div style="margin-bottom:20px; color:#23408e;">Вы можете отправить результаты разметки и обновить статистику или продолжить разметку.</div>
+        <div style="display:flex; gap:16px; justify-content:center;">
+          <button id="manualReviewFinishBtn" class="main-btn accent">Завершить разметку</button>
+          <button id="manualReviewContinueBtn" class="main-btn">Продолжить разметку</button>
+        </div>
+      </div>
+    </div>
     <style>
     .manual-review-modal {
         position: fixed; z-index: 10000; left: 0; top: 0; width: 100vw; height: 100vh;

@@ -348,6 +348,53 @@ document.addEventListener('DOMContentLoaded', function() {
         updateAnalysisInfoFromSettings(settings);
     });
     // ... существующий код ...
+    const finishBtn = document.getElementById('manualReviewFinishBtn');
+    const continueBtn = document.getElementById('manualReviewContinueBtn');
+    if (finishBtn) {
+        finishBtn.onclick = function() {
+            hideManualReviewConfirmModal();
+            // Закрываем окно ручной разметки
+            document.getElementById('manualReviewModal').style.display = 'none';
+            // Отправляем результаты на backend
+            const sessionId = window.lastSessionId || null;
+            if (sessionId && manualReviewResults.length > 0) {
+                fetch('/api/manual_review', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId, reviews: manualReviewResults })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        // Запрашиваем обновленную статистику
+                        return fetch(`/api/updated_stats/${sessionId}`);
+                    } else {
+                        throw new Error(data.error || 'Неизвестная ошибка');
+                    }
+                })
+                .then(r => r.json())
+                .then(updatedStats => {
+                    if (updatedStats.error) {
+                        throw new Error(updatedStats.error);
+                    }
+                    updateStatsDisplay(updatedStats);
+                    alert('Ручная разметка успешно сохранена!');
+                })
+                .catch(e => {
+                    alert('Ошибка сохранения разметки: ' + e.message);
+                });
+            } else {
+                alert('Ручная разметка завершена! (session_id не найден или нет результатов)');
+            }
+        };
+    }
+    if (continueBtn) {
+        continueBtn.onclick = function() {
+            hideManualReviewConfirmModal();
+            // Возвращаем окно ручной разметки в том же виде
+            document.getElementById('manualReviewModal').style.display = 'flex';
+        };
+    }
 });
 
 // --- Модальное окно для ручной разметки ---
@@ -356,6 +403,18 @@ let manualReviewIndex = 0;
 let manualReviewResults = [];
 let manualReviewStatuses = []; // Новый массив для хранения выбранных статусов
 
+// --- Модальное окно подтверждения завершения разметки ---
+function showManualReviewConfirmModal() {
+    const modal = document.getElementById('manualReviewConfirmModal');
+    if (modal) modal.style.display = 'flex';
+    // Скрываем окно ручной разметки, если оно открыто
+    const reviewModal = document.getElementById('manualReviewModal');
+    if (reviewModal) reviewModal.style.display = 'none';
+}
+function hideManualReviewConfirmModal() {
+    const modal = document.getElementById('manualReviewConfirmModal');
+    if (modal) modal.style.display = 'none';
+}
 // --- Горячие клавиши для ручной разметки ---
 document.addEventListener('keydown', function(e) {
     const modal = document.getElementById('manualReviewModal');
@@ -461,39 +520,9 @@ function markManualReview(status) {
     if (manualReviewIndex < manualReviewQueue.length) {
         renderManualReviewItem();
     } else {
-        closeManualReview();
-        // Отправляем результаты на backend
-        const sessionId = window.lastSessionId || null;
-        if (sessionId) {
-            fetch('/api/manual_review', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ session_id: sessionId, reviews: manualReviewResults })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    // Запрашиваем обновленную статистику
-                    return fetch(`/api/updated_stats/${sessionId}`);
-                } else {
-                    throw new Error(data.error || 'Неизвестная ошибка');
-                }
-            })
-            .then(r => r.json())
-            .then(updatedStats => {
-                if (updatedStats.error) {
-                    throw new Error(updatedStats.error);
-                }
-                // Обновляем отображение статистики
-                updateStatsDisplay(updatedStats);
-                alert('Ручная разметка успешно сохранена!');
-            })
-            .catch(e => {
-                alert('Ошибка сохранения разметки: ' + e.message);
-            });
-        } else {
-            alert('Ручная разметка завершена! (session_id не найден)');
-        }
+        // Вместо завершения — показываем окно подтверждения
+        document.getElementById('manualReviewModal').style.display = 'none';
+        showManualReviewConfirmModal();
     }
 }
 
@@ -513,6 +542,11 @@ function updateStatsDisplay(updatedStats) {
 }
 
 function closeManualReview() {
+    // Если есть незавершённые результаты — спрашиваем подтверждение
+    if (manualReviewResults.length > 0 && manualReviewResults.length < manualReviewQueue.length) {
+        showManualReviewConfirmModal();
+        return;
+    }
     document.getElementById('manualReviewModal').style.display = 'none';
 }
 
@@ -520,60 +554,52 @@ function closeManualReview() {
 function renderDetailedAnalysis(detailedStats, analysisSettings) {
     const container = document.getElementById('detailedAnalysis');
     if (!container) return;
-    
     let html = '';
-    
     detailedStats.forEach((fileStats, index) => {
         html += `<div class="detailed-file-stats">`;
         html += `<h4>📄 ${fileStats.file_name}</h4>`;
         html += `<div style="font-size: 14px; color: #666; margin-bottom: 12px;">Всего коллизий: <strong>${fileStats.total_collisions}</strong></div>`;
-        
-        // Разметка алгоритмом (всегда показываем)
-        const algorithm = fileStats.algorithm;
-        const algorithmTotal = algorithm.approved + algorithm.active + algorithm.reviewed;
-        if (algorithmTotal > 0) {
-            html += `<div style="margin-bottom: 12px;">`;
-            html += `<div class="stats-label">🤖 Разметка алгоритмом:</div>`;
+        // Итоговая статистика по статусу
+        if (fileStats.status_counts) {
+            html += `<div class="stats-label">Статистика по статусу:</div>`;
             html += `<div class="stats-row">`;
-            html += `<span class="stats-approved">✅ Approved: ${algorithm.approved}</span>`;
-            html += `<span class="stats-active">❌ Active: ${algorithm.active}</span>`;
-            html += `<span class="stats-reviewed">🔍 Reviewed: ${algorithm.reviewed}</span>`;
-            html += `</div></div>`;
+            html += `<span class="stats-approved">✅ Approved: ${fileStats.status_counts.Approved || 0}</span>`;
+            html += `<span class="stats-active">❌ Active: ${fileStats.status_counts.Active || 0}</span>`;
+            html += `<span class="stats-reviewed">🔍 Reviewed: ${fileStats.status_counts.Reviewed || 0}</span>`;
+            html += `</div>`;
         }
-        
-        // Разметка моделью (показываем только если используется модель)
-        const model = fileStats.model;
-        const modelTotal = model.approved + model.active + model.reviewed;
-        if (modelTotal > 0 && analysisSettings.inference_mode === 'model') {
-            html += `<div style="margin-bottom: 12px;">`;
-            html += `<div class="stats-label">🧠 Разметка моделью компьютерного зрения:</div>`;
+        // Статистика по алгоритму
+        if (fileStats.algorithm) {
+            html += `<div class="stats-label">Статистика по алгоритму:</div>`;
             html += `<div class="stats-row">`;
-            html += `<span class="stats-approved">✅ Approved: ${model.approved}</span>`;
-            html += `<span class="stats-active">❌ Active: ${model.active}</span>`;
-            html += `<span class="stats-reviewed">🔍 Reviewed: ${model.reviewed}</span>`;
-            html += `</div></div>`;
+            html += `<span class="stats-approved">✅ Approved: ${fileStats.algorithm.approved || 0}</span>`;
+            html += `<span class="stats-active">❌ Active: ${fileStats.algorithm.active || 0}</span>`;
+            html += `<span class="stats-reviewed">🔍 Reviewed: ${fileStats.algorithm.reviewed || 0}</span>`;
+            html += `</div>`;
         }
-        
-        // Ручная разметка (показываем только если включена)
-        const manual = fileStats.manual;
-        const manualTotal = manual.approved + manual.active + manual.reviewed;
-        if (manualTotal > 0 && analysisSettings.manual_review_enabled) {
-            html += `<div style="margin-bottom: 12px;">`;
-            html += `<div class="stats-label">👤 Ручная разметка:</div>`;
+        // Статистика по модели
+        if (fileStats.model) {
+            html += `<div class="stats-label">Статистика по модели:</div>`;
             html += `<div class="stats-row">`;
-            html += `<span class="stats-approved">✅ Approved: ${manual.approved}</span>`;
-            html += `<span class="stats-active">❌ Active: ${manual.active}</span>`;
-            html += `<span class="stats-reviewed">🔍 Reviewed: ${manual.reviewed}</span>`;
-            html += `</div></div>`;
+            html += `<span class="stats-approved">✅ Approved: ${fileStats.model.approved || 0}</span>`;
+            html += `<span class="stats-active">❌ Active: ${fileStats.model.active || 0}</span>`;
+            html += `<span class="stats-reviewed">🔍 Reviewed: ${fileStats.model.reviewed || 0}</span>`;
+            html += `</div>`;
         }
-        
+        // Статистика по ручной разметке
+        if (fileStats.manual) {
+            html += `<div class="stats-label">Статистика по ручной разметке:</div>`;
+            html += `<div class="stats-row">`;
+            html += `<span class="stats-approved">✅ Approved: ${fileStats.manual.approved || 0}</span>`;
+            html += `<span class="stats-active">❌ Active: ${fileStats.manual.active || 0}</span>`;
+            html += `<span class="stats-reviewed">🔍 Reviewed: ${fileStats.manual.reviewed || 0}</span>`;
+            html += `</div>`;
+        }
         html += `</div>`;
     });
-    
     if (html === '') {
         html = '<div style="text-align: center; color: #666; padding: 20px;">Нет данных для отображения</div>';
     }
-    
     container.innerHTML = html;
 }
 
