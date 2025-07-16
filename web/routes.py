@@ -614,6 +614,16 @@ def analyze_files():
         else:
             logger.info("Ручная разметка отключена в настройках")
         
+        # --- Формируем статусы этапов анализа для фронта ---
+        stage_statuses = []
+        # Этап 1: алгоритм всегда есть
+        stage_statuses.append({'key': 'algorithm', 'status': 'done'})
+        # Этап 2: модель
+        if inference_mode in ('model', 'hybrid'):
+            stage_statuses.append({'key': 'model', 'status': 'done'})
+        # Этап 3: ручная разметка
+        if manual_review_enabled:
+            stage_statuses.append({'key': 'manual', 'status': 'done'})
         response_data = {
             'success': True,
             'session_id': session_id,
@@ -623,7 +633,8 @@ def analyze_files():
             'used_images': export_format == 'standard',
             'analysis_settings': analysis_settings,
             'manual_review_collisions': manual_review_collisions,
-            'detailed_stats': detailed_stats
+            'detailed_stats': detailed_stats,
+            'stage_statuses': stage_statuses
         }
         
         logger.info(f"Отправляем ответ с {len(download_links)} ссылками для скачивания и {len(detailed_stats)} детальными статистиками")

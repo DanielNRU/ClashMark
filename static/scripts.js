@@ -334,13 +334,62 @@ if (searchInput) {
 
 // --- Загрузка настроек при загрузке страницы для analysisInfo ---
 function updateAnalysisInfoFromSettings(settings) {
-    const analysisInfo = document.getElementById('analysisInfo');
-    if (!analysisInfo) return;
-    let mode = settings.inference_mode === 'model' ? 'модель' : 'алгоритм';
-    let manual = settings.manual_review_enabled ? 'с ручной разметкой' : 'без ручной разметки';
-    let format = settings.export_format === 'bimstep' ? 'BIM Step' : 'стандартный';
-    let model = settings.model_file || '';
-    analysisInfo.textContent = `В режиме ${mode} ${manual}. Формат экспорта: ${format}${mode === 'модель' ? `, модель: ${model}` : ''}`;
+    window.lastExportFormat = settings.export_format;
+    window.lastModelFile = settings.model_file || '';
+    setAnalysisStagesFromSettings(settings);
+}
+
+// --- Этапы анализа: отображение статусов ---
+const STAGE_ICONS = {
+    pending: '',
+    in_progress: '<span class="spinner-inline"></span>',
+    done: '✅'
+};
+
+function renderAnalysisStages(stages, exportFormat, modelFile) {
+    const container = document.getElementById('analysisStages');
+    if (!container) return;
+    let html = '';
+    stages.forEach(stage => {
+        let icon = '';
+        if (stage.status === 'in_progress') {
+            icon = '<span class="spinner-inline"></span>';
+        } else if (stage.status === 'done') {
+            icon = '✅';
+        } else {
+            icon = '';
+        }
+        html += `<div style="margin-bottom:4px;display:flex;align-items:center;gap:8px;"><span>${icon}</span><span>${stage.label}</span></div>`;
+    });
+    // Итоговая строка
+    let formatStr = exportFormat === 'bimstep' ? 'BIM Step' : 'стандартный';
+    let modelStr = modelFile ? `, Выбрана модель: ${modelFile}` : '';
+    html += `<div style="margin-top:10px;color:#23408e;font-size:14px;">Формат экспорта: ${formatStr}${modelStr}</div>`;
+    container.innerHTML = html;
+    // Добавляем CSS для spinner-inline
+    if (!document.getElementById('spinner-inline-style')) {
+        const style = document.createElement('style');
+        style.id = 'spinner-inline-style';
+        style.innerHTML = `.spinner-inline { display:inline-block;width:16px;height:16px;border:2px solid #e3e3e3;border-radius:50%;border-top-color:#23408e;animation:spin 1s linear infinite;vertical-align:middle;margin-right:2px;}
+        @keyframes spin { to { transform: rotate(360deg); } }`;
+        document.head.appendChild(style);
+    }
+}
+
+// --- Управление этапами анализа ---
+let currentAnalysisStages = [];
+function setAnalysisStagesFromSettings(settings) {
+    currentAnalysisStages = [
+        { key: 'algorithm', label: 'Разметка алгоритмом', enabled: true, status: 'pending' },
+        { key: 'model', label: 'Разметка моделью компьютерного зрения', enabled: settings.inference_mode === 'model' || settings.inference_mode === 'hybrid', status: 'pending' },
+        { key: 'manual', label: 'Ручная разметка', enabled: settings.manual_review_enabled, status: 'pending' }
+    ];
+    renderAnalysisStages(currentAnalysisStages, settings.export_format, settings.model_file);
+}
+function updateStageStatus(key, status) {
+    const stage = currentAnalysisStages.find(s => s.key === key);
+    if (stage) stage.status = status;
+    renderAnalysisStages(currentAnalysisStages, window.lastExportFormat, window.lastModelFile);
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -636,6 +685,21 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
         detailedAnalysis.innerHTML = '';
     }
     // analysisInfo обновляется из настроек до анализа не требуется, т.к. уже обновлено при загрузке
+    // --- Новый блок: сбрасываем статусы этапов ---
+    let firstActive = true;
+    currentAnalysisStages.forEach(s => {
+        if (s.enabled) {
+            if (firstActive) {
+                s.status = 'in_progress';
+                firstActive = false;
+            } else {
+                s.status = 'pending';
+            }
+        } else {
+            s.status = '';
+        }
+    });
+    renderAnalysisStages(currentAnalysisStages, window.lastExportFormat, window.lastModelFile);
     try {
         const response = await fetch('/analyze', {
             method: 'POST',
@@ -643,8 +707,15 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
         });
         const data = await response.json();
         // --- Новый блок: отображаем настройки анализа ---
-        if (data.analysis_settings && analysisInfo) {
+        if (data.analysis_settings) {
             updateAnalysisInfoFromSettings(data.analysis_settings);
+        }
+        // --- Новый блок: обновляем статусы этапов по ходу анализа ---
+        if (data.stage_statuses) {
+            data.stage_statuses.forEach(({key, status}) => updateStageStatus(key, status));
+        } else {
+            currentAnalysisStages.forEach(s => { if (s.enabled) s.status = 'done'; });
+            renderAnalysisStages(currentAnalysisStages, window.lastExportFormat, window.lastModelFile);
         }
         if (data.error) {
             errorContainer.innerHTML = `<span class="icon">⚠️</span> ${data.error}`;
