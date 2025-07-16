@@ -367,7 +367,7 @@ function renderAnalysisStages(stages, exportFormat, modelFile) {
     });
     // Итоговая строка
     let formatStr = exportFormat === 'bimstep' ? 'BIM Step' : 'стандартный';
-    let modelStr = modelFile ? `, Выбрана модель: ${modelFile}` : '';
+    let modelStr = modelFile ? `, <br>Выбрана модель: ${modelFile}` : '';
     html += `<div style=\"margin-top:10px;color:#666;font-size:14px;\">Формат экспорта: ${formatStr}${modelStr}</div>`;
     container.innerHTML = html;
     // Добавляем CSS для spinner-inline
