@@ -139,7 +139,15 @@ def collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_fo
             continue
     
     if all_data:
-        return pd.concat(all_data, ignore_index=True)
+        df = pd.concat(all_data, ignore_index=True)
+        # Добавляем clash_uid, если его нет
+        if 'clash_uid' not in df.columns and 'element1_id' in df.columns and 'element2_id' in df.columns:
+            def make_uid(row):
+                id1 = str(row['element1_id']) if pd.notna(row['element1_id']) else ''
+                id2 = str(row['element2_id']) if pd.notna(row['element2_id']) else ''
+                return f"{min(id1, id2)}_{max(id1, id2)}" if id1 and id2 else ''
+            df['clash_uid'] = df.apply(make_uid, axis=1)
+        return df
     else:
         return pd.DataFrame()
 
