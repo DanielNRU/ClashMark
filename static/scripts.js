@@ -378,6 +378,25 @@ document.addEventListener('DOMContentLoaded', function() {
                         throw new Error(updatedStats.error);
                     }
                     updateStatsDisplay(updatedStats);
+                    // --- ДОБАВЛЕНО: обновление ссылок на скачивание после ручной разметки ---
+                    if (updatedStats.download_links) {
+                        const downloadContainer = document.getElementById('downloadContainer');
+                        let downloadHtml = '<h4>📥 Скачать результаты:</h4><div class="download-links">';
+                        updatedStats.download_links.forEach(link => {
+                            downloadHtml += `
+                                <a href="${link.url}" class="download-link">
+                                    <span class="file-name">${link.name}</span>
+                                    <span class="download-icon">⬇️</span>
+                                </a>
+                            `;
+                        });
+                        downloadHtml += '</div>';
+                        downloadContainer.innerHTML = downloadHtml;
+                    }
+                    // --- ДОБАВЛЕНО: обновление детального анализа после ручной разметки ---
+                    if (updatedStats.detailed_stats && Array.isArray(updatedStats.detailed_stats)) {
+                        renderDetailedAnalysis(updatedStats.detailed_stats, updatedStats.analysis_settings);
+                    }
                     alert('Ручная разметка успешно сохранена!');
                 })
                 .catch(e => {
@@ -559,15 +578,6 @@ function renderDetailedAnalysis(detailedStats, analysisSettings) {
         html += `<div class="detailed-file-stats">`;
         html += `<h4>📄 ${fileStats.file_name}</h4>`;
         html += `<div style="font-size: 14px; color: #666; margin-bottom: 12px;">Всего коллизий: <strong>${fileStats.total_collisions}</strong></div>`;
-        // Итоговая статистика по статусу
-        if (fileStats.status_counts) {
-            html += `<div class="stats-label">Статистика по статусу:</div>`;
-            html += `<div class="stats-row">`;
-            html += `<span class="stats-approved">✅ Approved: ${fileStats.status_counts.Approved || 0}</span>`;
-            html += `<span class="stats-active">❌ Active: ${fileStats.status_counts.Active || 0}</span>`;
-            html += `<span class="stats-reviewed">🔍 Reviewed: ${fileStats.status_counts.Reviewed || 0}</span>`;
-            html += `</div>`;
-        }
         // Статистика по алгоритму
         if (fileStats.algorithm) {
             html += `<div class="stats-label">Статистика по алгоритму:</div>`;

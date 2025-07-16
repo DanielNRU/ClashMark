@@ -39,53 +39,35 @@ ALLOWED_EXTENSIONS = {'xml', 'zip'}
 session_dirs = {}
 
 def apply_manual_review(df, session_dir):
-    """Применяет ручную разметку к DataFrame из файла manual_review.json и сохраняет исходные значения в отдельные колонки"""
+    """Применяет ручную разметку к DataFrame из файла manual_review.json, обновляя только строки с clash_uid из разметки, остальные не трогает."""
     review_path = os.path.join(session_dir, 'manual_review.json')
     if not os.path.exists(review_path):
         logger.info(f"Файл ручной разметки не найден: {review_path}")
         return df
     try:
         import json
-        try:
-            with open(review_path, 'r', encoding='utf-8') as f:
-                reviews = json.load(f)
-            logger.info(f"[apply_manual_review] Прочитано {len(reviews)} разметок из {review_path}")
-        except Exception as e:
-            logger.error(f"[apply_manual_review] Ошибка чтения manual_review.json: {e}")
-            if os.path.exists(review_path):
-                os.remove(review_path)
-            return df
-        # Проверка наличия нужных колонок
-        required_cols = ['cv_prediction', 'prediction_source']
-        for col in required_cols:
-            if col not in df.columns:
-                logger.error(f"DataFrame не содержит колонку {col}")
-                return df
-        # --- Заменено: теперь ключ - clash_uid ---
+        with open(review_path, 'r', encoding='utf-8') as f:
+            reviews = json.load(f)
+        logger.info(f"[apply_manual_review] Прочитано {len(reviews)} разметок из {review_path}")
         review_map = {r['clash_uid']: r['status'] for r in reviews}
         df_updated = df.copy()
-        
         # Добавляем колонки для исходных значений, если их нет
         if 'original_prediction_source' not in df_updated.columns:
             df_updated['original_prediction_source'] = df_updated['prediction_source']
         if 'original_cv_prediction' not in df_updated.columns:
             df_updated['original_cv_prediction'] = df_updated['cv_prediction']
-        
         applied_count = 0
         for idx, row in df_updated.iterrows():
             cid = row.get('clash_uid')
             if cid in review_map:
                 status = review_map[cid]
                 applied_count += 1
-                logger.debug(f"Применяем разметку: clash_uid={cid}, status={status}")
-                
                 # Сохраняем исходные значения только если это первая ручная разметка
                 if pd.isna(row.get('original_prediction_source')):
                     df_updated.at[idx, 'original_prediction_source'] = row.get('prediction_source')
                 if pd.isna(row.get('original_cv_prediction')):
                     df_updated.at[idx, 'original_cv_prediction'] = row.get('cv_prediction')
-                
-                # Ручная разметка имеет приоритет над всеми другими источниками
+                # Обновляем только нужные поля
                 if status == 'Approved':
                     df_updated.at[idx, 'cv_prediction'] = 0
                     df_updated.at[idx, 'cv_confidence'] = 1.0
@@ -101,15 +83,12 @@ def apply_manual_review(df, session_dir):
                     df_updated.at[idx, 'cv_confidence'] = 0.5
                     df_updated.at[idx, 'prediction_source'] = 'manual_review'
                     df_updated.at[idx, 'cv_status'] = 'Reviewed'
-        
         logger.info(f"Применена ручная разметка к {applied_count} коллизиям из {len(reviews)} разметок")
-        
         # Логируем статистику после применения ручной разметки
         manual_approved = len(df_updated[(df_updated['prediction_source'] == 'manual_review') & (df_updated['cv_prediction'] == 0)])
         manual_active = len(df_updated[(df_updated['prediction_source'] == 'manual_review') & (df_updated['cv_prediction'] == 1)])
         manual_reviewed = len(df_updated[(df_updated['prediction_source'] == 'manual_review') & (df_updated['cv_prediction'] == -1)])
         logger.info(f"Статистика ручной разметки после применения: Approved={manual_approved}, Active={manual_active}, Reviewed={manual_reviewed}")
-        
         return df_updated
     except Exception as e:
         logger.error(f"Ошибка применения ручной разметки: {e}")
