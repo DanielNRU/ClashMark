@@ -351,6 +351,7 @@ function renderAnalysisStages(stages, exportFormat, modelFile) {
     if (!container) return;
     let html = '';
     stages.forEach(stage => {
+        if (!stage.enabled) return;
         let icon = '';
         if (stage.status === 'in_progress') {
             icon = '<span class="spinner-inline"></span>';
@@ -359,12 +360,15 @@ function renderAnalysisStages(stages, exportFormat, modelFile) {
         } else {
             icon = '';
         }
-        html += `<div style="margin-bottom:4px;display:flex;align-items:center;gap:8px;"><span>${icon}</span><span>${stage.label}</span></div>`;
+        html += `<div style="margin-bottom:4px;display:flex;align-items:center;gap:8px;">
+            <span style=\"color:#23408e;font-weight:600;\">${icon}</span>
+            <span style=\"color:#23408e;font-weight:500;\">${stage.label}</span>
+        </div>`;
     });
     // Итоговая строка
     let formatStr = exportFormat === 'bimstep' ? 'BIM Step' : 'стандартный';
     let modelStr = modelFile ? `, Выбрана модель: ${modelFile}` : '';
-    html += `<div style="margin-top:10px;color:#23408e;font-size:14px;">Формат экспорта: ${formatStr}${modelStr}</div>`;
+    html += `<div style=\"margin-top:10px;color:#666;font-size:14px;\">Формат экспорта: ${formatStr}${modelStr}</div>`;
     container.innerHTML = html;
     // Добавляем CSS для spinner-inline
     if (!document.getElementById('spinner-inline-style')) {
