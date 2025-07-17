@@ -9,6 +9,7 @@ from werkzeug.utils import secure_filename
 import pandas as pd
 from datetime import datetime
 import uuid
+import threading
 
 from core.xml_utils import (
     load_all_category_pairs, get_pair, parse_xml_data, export_to_bimstep_xml, export_to_xml, add_bimstep_journal_entry
@@ -19,9 +20,12 @@ from ml.dataset import CollisionImageDataset, create_transforms
 from ml.inference import predict, fill_xml_fields
 from ml.train import train_model
 from web.utils import safe_filename_with_cyrillic, load_settings, save_settings
-from web.progress import train_progress, update_train_progress
+from web.progress import update_train_progress, load_train_progress
 
 logger = logging.getLogger(__name__)
+
+# Глобальная переменная для хранения пути к последней временной папке обучения
+last_train_temp_dir = None
 
 # Явно указываем путь к шаблонам
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -1100,24 +1104,21 @@ def train_progress_page():
 
 @app.route('/api/train', methods=['POST'])
 def api_train():
+    global last_train_temp_dir
     try:
         xml_files = request.files.getlist('xml_file')
         zip_files = request.files.getlist('zip_file')
-        
         if not xml_files:
             return jsonify({'error': 'Пожалуйста, загрузите XML файлы.'})
         elif not zip_files:
             return jsonify({'error': 'Пожалуйста, загрузите архив(ы) с изображениями.'})
-        
         batch_size = int(request.form.get('batch_size', 16))
         epochs = int(request.form.get('epochs', 5))
-        
         # Создаем временную папку
         session_dir = tempfile.mkdtemp(prefix='train_session_')
-        
+        last_train_temp_dir = session_dir  # Сохраняем путь для прогресса
         xml_paths = []
         zip_paths = []
-        
         # Сохраняем XML файлы
         for xml_file in xml_files:
             if not xml_file.filename:
@@ -1125,7 +1126,6 @@ def api_train():
             xml_path = os.path.join(session_dir, safe_filename_with_cyrillic(xml_file.filename))
             xml_file.save(xml_path)
             xml_paths.append(xml_path)
-        
         # Сохраняем и распаковываем ZIP файлы
         for zip_file in zip_files:
             if not zip_file.filename:
@@ -1133,102 +1133,155 @@ def api_train():
             zip_path = os.path.join(session_dir, safe_filename_with_cyrillic(zip_file.filename))
             zip_file.save(zip_path)
             zip_paths.append(zip_path)
-        
-        # Распаковываем ZIP файлы
         for zip_path in zip_paths:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(session_dir)
-        
-        # Собираем датасет
-        xml_path_name_pairs = [(path, os.path.basename(path)) for path in xml_paths]
+        # Определяем папку с изображениями
+        bsimages_dir = os.path.join(session_dir, 'BSImages')
+        has_bsimages = os.path.exists(bsimages_dir) and os.path.isdir(bsimages_dir)
         settings = load_settings()
         export_format = settings.get('export_format', 'standard')
         manual_review_enabled = False # По умолчанию для обучения
-        df = collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format=export_format, manual_review_enabled=manual_review_enabled)
-        
-        if df.empty:
+        images_dirs = []
+        if export_format == 'bimstep':
+            if has_bsimages:
+                images_dirs = [bsimages_dir, session_dir]
+            else:
+                images_dirs = [session_dir]
+        else:  # standard
+            if has_bsimages:
+                images_dirs = [bsimages_dir, session_dir]
+            else:
+                images_dirs = [session_dir]
+        from core.xml_utils import parse_xml_data
+        import pandas as pd
+        all_dataframes = []
+        for xml_path in xml_paths:
+            df = parse_xml_data(xml_path, export_format=export_format)
+            if len(df) == 0:
+                continue
+            def find_img(href):
+                import os
+                from core.image_utils import find_image_by_name
+                for d in images_dirs:
+                    path = find_image_by_name(href, d) if href else None
+                    if path:
+                        return path
+                return None
+            df['image_file'] = df['image_href'].apply(find_img)
+            df['source_file'] = os.path.basename(xml_path)
+            all_dataframes.append(df)
+        if not all_dataframes:
             return jsonify({'error': 'Не удалось обработать XML файлы!'})
-        
-        # Загружаем категории пар
+        combined_df = pd.concat(all_dataframes, ignore_index=True)
+        df_with_images = combined_df[combined_df['image_file'].notna() & combined_df['image_file'].apply(lambda x: x is not None)]
+        if not isinstance(df_with_images, pd.DataFrame):
+            df_with_images = pd.DataFrame(df_with_images)
+        if 'IsResolved' in df_with_images.columns:
+            df_with_images = df_with_images[df_with_images['IsResolved'].isin([0, 1])].copy()
+        df = df_with_images
+        if df.empty:
+            return jsonify({'error': 'Не найдено изображений для обучения!'})
         pairs = load_all_category_pairs('category_pairs.yaml')
         visual_pairs = set()
-        
         if 'visual' in pairs and isinstance(pairs['visual'], list):
             for pair in pairs['visual']:
                 if isinstance(pair, list) and len(pair) == 2:
                     a, b = pair
                     visual_pairs.add((a, b) if a <= b else (b, a))
-        
-        # Фильтруем только visual пары
         df_visual = df[df.apply(lambda row: get_pair(row) in visual_pairs, axis=1)].copy()
-        
         if len(df_visual) == 0:
             return jsonify({'error': 'Нет подходящих коллизий для обучения модели (Approved и Active)!'})
-        
-        # Проверяем наличие image_file
         if 'image_file' not in df_visual.columns:
             return jsonify({'error': 'Колонка image_file не найдена в данных!'})
-        
-        # Фильтруем строки с пустыми image_file
         df_visual = df_visual[pd.Series(df_visual['image_file']).notna() & (pd.Series(df_visual['image_file']) != '')]
-        
         if len(df_visual) == 0:
             return jsonify({'error': 'Не найдено изображений для обучения!'})
-        
-        # Создаем модель
         model_name = f'model_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pt'
         model_save_path = os.path.join('model', model_name)
-        
-        # Функция обратного вызова для прогресса
+        # Инициализация прогресса обучения до запуска потока
+        update_train_progress({
+            'status': 'start',
+            'epoch': 0,
+            'batch': 0,
+            'total_epochs': epochs,
+            'total_batches': 0,
+            'loss': 0,
+            'metrics': {},
+            'log': '',
+            'started': False
+        }, session_dir)
         def progress_callback(epoch, batch, total_batches, train_loss, val_loss, val_acc, f1, recall, precision=None):
-            update_train_progress({
-                'epoch': epoch,
-                'batch': batch,
+            prog = load_train_progress(session_dir)
+            # Инициализация массивов метрик, если их нет
+            for key in ['train_losses', 'val_losses', 'val_accuracies', 'val_f1s', 'val_recalls', 'val_precisions']:
+                if 'metrics' not in prog or key not in prog['metrics']:
+                    prog.setdefault('metrics', {})[key] = []
+            # Добавлять значения в массивы только на последнем батче эпохи и только если метрики не None
+            if batch == total_batches - 1 and val_loss is not None and val_acc is not None and f1 is not None and recall is not None and precision is not None:
+                prog['metrics']['train_losses'].append(float(train_loss))
+                prog['metrics']['val_losses'].append(float(val_loss))
+                prog['metrics']['val_accuracies'].append(float(val_acc))
+                prog['metrics']['val_f1s'].append(float(f1))
+                prog['metrics']['val_recalls'].append(float(recall))
+                prog['metrics']['val_precisions'].append(float(precision))
+            # last_* значения обновлять всегда
+            prog.update({
+                'status': 'in_progress',
+                'started': True,
+                'epoch': epoch + 1,
+                'batch': batch + 1,
+                'total_epochs': epochs,
                 'total_batches': total_batches,
-                'train_loss': train_loss,
-                'val_loss': val_loss,
-                'val_acc': val_acc,
-                'f1': f1,
-                'recall': recall,
-                'precision': precision
+                'loss': float(train_loss),
+                'metrics': {
+                    **prog.get('metrics', {}),
+                    'last_train_loss': float(train_loss),
+                    'last_val_loss': float(val_loss) if val_loss is not None else '',
+                    'last_val_acc': float(val_acc) if val_acc is not None else '',
+                    'last_f1': float(f1) if f1 is not None else '',
+                    'last_recall': float(recall) if recall is not None else '',
+                    'last_precision': float(precision) if precision is not None else ''
+                }
             })
-        
-        # Запускаем обучение
-        metrics = train_model(df_visual, epochs=epochs, batch_size=batch_size, progress_callback=progress_callback)
-        
-        if metrics is None:
-            return jsonify({'error': 'Обучение не запущено: в обучающей выборке только один класс!'})
-        
-        # Сохраняем статистику
-        from collections import Counter
-        pair_counts = Counter(pd.DataFrame(df_visual).apply(get_pair, axis=1))
-        pairs_with_counts = sorted([[str(p[0]), str(p[1]), int(c)] for p, c in pair_counts.items()], key=lambda x: (-int(x[2] or 0), str(x[0]), str(x[1])))
-        stats = {
-            'model_file': model_name,
-            'train_time': datetime.now().isoformat(),
-            'metrics': metrics,
-            'category_pairs': pairs_with_counts,
-            'epochs': epochs,
-            'batch_size': batch_size
-        }
-        
-        stats_path = os.path.join('model', f'{model_name}_stats.json')
-        with open(stats_path, 'w', encoding='utf-8') as f:
-            json.dump(stats, f, ensure_ascii=False, indent=2, default=str)
-        
-        return jsonify(to_py({
-            'success': True,
-            'model_file': model_name,
-            'metrics': metrics
-        }))
-        
+            update_train_progress(prog, session_dir)
+        def train_job():
+            try:
+                metrics = train_model(df_visual, epochs=epochs, batch_size=batch_size, progress_callback=progress_callback)
+                if metrics is None:
+                    update_train_progress({'status': 'error', 'log': 'Обучение не запущено: в обучающей выборке только один класс!'}, session_dir)
+                    return
+                from collections import Counter
+                pair_counts = Counter(pd.DataFrame(df_visual).apply(get_pair, axis=1))
+                pairs_with_counts = sorted([[str(p[0]), str(p[1]), int(c)] for p, c in pair_counts.items()], key=lambda x: (-int(x[2] or 0), str(x[0]), str(x[1])))
+                stats = {
+                    'model_file': model_name,
+                    'train_time': datetime.now().isoformat(),
+                    'metrics': metrics,
+                    'category_pairs': pairs_with_counts,
+                    'epochs': epochs,
+                    'batch_size': batch_size
+                }
+                stats_path = os.path.join('model', f'{model_name}_stats.json')
+                with open(stats_path, 'w', encoding='utf-8') as f:
+                    json.dump(stats, f, ensure_ascii=False, indent=2, default=str)
+                update_train_progress({'status': 'done', 'metrics': metrics}, session_dir)
+            except Exception as e:
+                logger.error(f"Ошибка обучения: {e}")
+                update_train_progress({'status': 'error', 'log': f'Ошибка обучения: {str(e)}'}, session_dir)
+        train_thread = threading.Thread(target=train_job)
+        train_thread.start()
+        return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Ошибка обучения: {e}")
         return jsonify({'error': f'Ошибка обучения: {str(e)}'})
 
 @app.route('/api/train_progress')
 def api_train_progress():
-    return jsonify(train_progress)
+    global last_train_temp_dir
+    if not last_train_temp_dir:
+        return jsonify({'status': 'not_started', 'message': 'Обучение ещё не запускалось'}), 200
+    return jsonify(load_train_progress(last_train_temp_dir))
 
 @app.route('/cleanup_session', methods=['POST'])
 def cleanup_session():
