@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 import os
 import logging
 from datetime import datetime
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,9 @@ def parse_xml_data(xml_path, export_format='standard'):
             clash['distance'] = float(distance_elem.text.replace(',', '.')) if distance_elem is not None and distance_elem.text else 0
             image_path_elem = clash_result.find('.//imagePath')
             image_path = image_path_elem.text if image_path_elem is not None else ''
-            clash['image_href'] = image_path.replace('\\', '/').strip() if image_path else ''
+            import os
+            image_name = os.path.basename(image_path.replace('\\', '/')) if image_path else ''
+            clash['image_href'] = image_name
             point_elem = clash_result.find('.//point')
             point_text = point_elem.text if point_elem is not None else '0;0;0'
             point_parts = point_text.split(';') if point_text else ['0', '0', '0']
@@ -438,3 +441,11 @@ def add_bimstep_journal_entry(clash_uid, prediction_type, comment, session_dir=N
     except Exception as e:
         logger.error(f"Ошибка добавления записи в журнал BIM Step: {e}")
         raise 
+
+def get_pairs_vectorized(df):
+    cat1 = df['element1_category'].astype(str).str.strip()
+    cat2 = df['element2_category'].astype(str).str.strip()
+    return pd.Series(list(zip(np.minimum(cat1, cat2), np.maximum(cat1, cat2))), index=df.index)
+
+def filter_valid_images(df):
+    return df[df['image_file'].notna() & (df['image_file'].astype(str).str.strip() != '')] 

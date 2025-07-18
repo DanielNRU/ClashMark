@@ -8,14 +8,13 @@
 
 <div class="progress-container card">
     <div id="train-status" class="progress-block"></div>
+    <div id="train-graphs" class="progress-block">
+        <h3>График метрик</h3>
+        <canvas id="metricsChart" height="400" width="900" style="display: block; box-sizing: border-box; height: 400px; width: 900px;"></canvas>
+    </div>
     <div id="train-metrics" class="progress-block">
         <h3>Метрики</h3>
-        <ul id="metrics-list"></ul>
-    </div>
-    <div id="train-graphs" class="progress-block">
-        <h3>Графики</h3>
-        <canvas id="lossChart" height="120"></canvas>
-        <canvas id="accuracyChart" height="120"></canvas>
+        <table id="metrics-table"></table>
     </div>
     <div id="confusion-matrix-block" class="progress-block">
         <h3>Матрица ошибок</h3>
@@ -32,10 +31,65 @@
   </div>
 </div>
 
+<style>
+.confusion-matrix {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 2px 16px #0001;
+    overflow: hidden;
+    margin-bottom: 24px;
+    font-size: 16px;
+    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+}
+.confusion-matrix th, .confusion-matrix td {
+    padding: 16px 20px;
+    text-align: center;
+    border: none;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+.confusion-matrix th {
+    background: #23408e;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+.confusion-matrix th:hover {
+    background: #1a2a4f;
+}
+.confusion-matrix tr {
+    transition: background 0.2s;
+}
+.confusion-matrix tr:hover {
+    background: #f0f4fa;
+}
+.confusion-matrix td {
+    border-bottom: 1px solid #e9ecef;
+    background: #fff;
+    color: #23408e;
+    font-weight: 600;
+    font-size: 18px;
+}
+.confusion-matrix tr:last-child td {
+    border-bottom: none;
+}
+.confusion-matrix .tp, .confusion-matrix .tn {
+    background: #e8f5e8 !important;
+    color: #2e7d32 !important;
+}
+.confusion-matrix .fp, .confusion-matrix .fn {
+    background: #fce4ec !important;
+    color: #c2185b !important;
+}
+</style>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-let lossChart = null;
-let accuracyChart = null;
+let metricsChart = null;
 let updateInterval = null;
 
 function showInfo() {
@@ -47,16 +101,52 @@ function closeInfo() {
     document.getElementById('infoModal').style.display = 'none';
 }
 
+function updateMetricsTable(data) {
+    const table = document.getElementById('metrics-table');
+    const nEpochs = data.total_epochs || (data.metrics && data.metrics.train_losses ? data.metrics.train_losses.length : 0);
+    if (!data.metrics || nEpochs === 0) {
+        table.innerHTML = '<tr><td style="color:#888">Нет данных</td></tr>';
+        return;
+    }
+    function fmt(val) {
+        if (val === undefined || val === null || val === '-') return '-';
+        const num = Number(val);
+        if (isNaN(num)) return val;
+        return num.toFixed(3);
+    }
+    let html = '<thead><tr>' +
+        '<th>Эпоха</th>' +
+        '<th>Train Loss</th>' +
+        '<th>Val Loss</th>' +
+        '<th>Val Accuracy</th>' +
+        '<th>F1</th>' +
+        '<th>Recall</th>' +
+        '<th>Precision</th>' +
+        '</tr></thead><tbody>';
+    for (let i = 0; i < nEpochs; i++) {
+        html += '<tr>' +
+            `<td>${i+1}</td>` +
+            `<td>${fmt(data.metrics.train_losses && data.metrics.train_losses[i])}</td>` +
+            `<td>${fmt(data.metrics.val_losses && data.metrics.val_losses[i])}</td>` +
+            `<td>${fmt(data.metrics.val_accuracies && data.metrics.val_accuracies[i])}</td>` +
+            `<td>${fmt(data.metrics.val_f1s && data.metrics.val_f1s[i])}</td>` +
+            `<td>${fmt(data.metrics.val_recalls && data.metrics.val_recalls[i])}</td>` +
+            `<td>${fmt(data.metrics.val_precisions && data.metrics.val_precisions[i])}</td>` +
+            '</tr>';
+    }
+    html += '</tbody>';
+    table.innerHTML = html;
+}
+
 function updateProgress() {
-    fetch('/train_progress_data')
+    fetch('/api/train_progress')
         .then(response => response.json())
         .then(data => {
             updateStatus(data);
-            updateMetrics(data);
             updateGraphs(data);
+            updateMetricsTable(data);
             updateConfusionMatrix(data);
             updateLog(data);
-            
             if (data.status === 'done' || data.status === 'error') {
                 clearInterval(updateInterval);
             }
@@ -68,6 +158,12 @@ function updateProgress() {
 
 function updateStatus(data) {
     const statusDiv = document.getElementById('train-status');
+    function fmt(val) {
+        if (val === undefined || val === null || val === '-') return '-';
+        const num = Number(val);
+        if (isNaN(num)) return val;
+        return num.toFixed(3);
+    }
     if (data.status === 'start') {
         statusDiv.innerHTML = '<h3>Статус обучения</h3><p>Подготовка к обучению...</p>';
     } else if (data.status === 'done') {
@@ -79,103 +175,26 @@ function updateStatus(data) {
             <h3>Статус обучения</h3>
             <p>Эпоха: ${data.epoch}/${data.total_epochs}</p>
             <p>Батч: ${data.batch}/${data.total_batches}</p>
-            <p>Потери: ${data.loss}</p>
+            <p>Потери: ${fmt(data.loss)}</p>
         `;
     }
 }
 
-function updateMetrics(data) {
-    const metricsList = document.getElementById('metrics-list');
-    if (data.metrics) {
-        let html = '';
-        if (data.metrics.last_train_loss !== undefined) {
-            html += `<li>Train Loss: ${data.metrics.last_train_loss}</li>`;
-        }
-        if (data.metrics.last_val_loss !== undefined && data.metrics.last_val_loss !== '') {
-            html += `<li>Val Loss: ${data.metrics.last_val_loss}</li>`;
-        }
-        if (data.metrics.last_val_acc !== undefined && data.metrics.last_val_acc !== '') {
-            html += `<li>Val Accuracy: ${data.metrics.last_val_acc}</li>`;
-        }
-        if (data.metrics.last_f1 !== undefined && data.metrics.last_f1 !== '') {
-            html += `<li>F1: ${data.metrics.last_f1}</li>`;
-        }
-        if (data.metrics.last_recall !== undefined && data.metrics.last_recall !== '') {
-            html += `<li>Recall: ${data.metrics.last_recall}</li>`;
-        }
-        if (data.metrics.last_precision !== undefined && data.metrics.last_precision !== '') {
-            html += `<li>Precision: ${data.metrics.last_precision}</li>`;
-        }
-        if (data.metrics.final_accuracy !== undefined) {
-            html += `<li><strong>Final Accuracy: ${data.metrics.final_accuracy}</strong></li>`;
-        }
-        if (data.metrics.final_f1 !== undefined) {
-            html += `<li><strong>Final F1: ${data.metrics.final_f1}</strong></li>`;
-        }
-        if (data.metrics.final_recall !== undefined) {
-            html += `<li><strong>Final Recall: ${data.metrics.final_recall}</strong></li>`;
-        }
-        if (data.metrics.final_precision !== undefined) {
-            html += `<li><strong>Final Precision: ${data.metrics.final_precision}</strong></li>`;
-        }
-        metricsList.innerHTML = html;
-    }
-}
-
 function updateGraphs(data) {
-    if (data.metrics && data.metrics.val_precisions) {
-        // Обновляем график потерь
-        if (!lossChart) {
-            const ctx = document.getElementById('lossChart').getContext('2d');
-            lossChart = new Chart(ctx, {
+    const nEpochs = data.total_epochs || (data.metrics && data.metrics.train_losses ? data.metrics.train_losses.length : 0);
+    if (data.metrics && data.metrics.val_accuracies && data.metrics.val_recalls && data.metrics.val_precisions && data.metrics.val_f1s) {
+        if (!metricsChart) {
+            const ctx = document.getElementById('metricsChart').getContext('2d');
+            metricsChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Train Loss',
-                        data: [],
-                        borderColor: '#4caf50',
-                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                        tension: 0.1
-                    }, {
-                        label: 'Val Loss',
-                        data: [],
-                        borderColor: '#2196f3',
-                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
-                        tension: 0.1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        }
-                    }
-                }
-            });
-        }
-        
-        // Обновляем график точности
-        if (!accuracyChart) {
-            const ctx = document.getElementById('accuracyChart').getContext('2d');
-            accuracyChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Val Accuracy',
-                        data: [],
-                        borderColor: '#ff9800',
-                        backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                        tension: 0.1
-                    }, {
-                        label: 'F1',
-                        data: [],
-                        borderColor: '#9c27b0',
-                        backgroundColor: 'rgba(156, 39, 176, 0.1)',
-                        tension: 0.1
-                    }]
+                    labels: Array.from({length: nEpochs}, (_, i) => i + 1),
+                    datasets: [
+                        {label: 'Accuracy', data: Array(nEpochs).fill(null), borderColor: '#4caf50', backgroundColor: 'rgba(76, 175, 80, 0.1)', tension: 0.1},
+                        {label: 'Recall', data: Array(nEpochs).fill(null), borderColor: '#ff9800', backgroundColor: 'rgba(255, 152, 0, 0.1)', tension: 0.1},
+                        {label: 'Precision', data: Array(nEpochs).fill(null), borderColor: '#009688', backgroundColor: 'rgba(0, 150, 136, 0.1)', tension: 0.1},
+                        {label: 'F1', data: Array(nEpochs).fill(null), borderColor: '#2196f3', backgroundColor: 'rgba(33, 150, 243, 0.1)', tension: 0.1}
+                    ]
                 },
                 options: {
                     responsive: true,
@@ -188,41 +207,51 @@ function updateGraphs(data) {
                 }
             });
         }
-        
-        // Добавляем данные на графики
-        const epochs = data.metrics.val_precisions.length;
-        const labels = Array.from({length: epochs}, (_, i) => i + 1);
-        
-        lossChart.data.labels = labels;
-        accuracyChart.data.labels = labels;
-        
-        // Обновляем данные (здесь нужно будет добавить реальные данные из метрик)
-        if (data.metrics.val_precisions) {
-            accuracyChart.data.datasets[0].data = data.metrics.val_precisions.map(v => v || 0);
+        metricsChart.data.labels = Array.from({length: nEpochs}, (_, i) => i + 1);
+        function fillMetric(arr) {
+            return Array.from({length: nEpochs}, (_, i) => (arr && arr[i] !== undefined ? arr[i] : null));
         }
-        if (data.metrics.val_f1s) {
-            accuracyChart.data.datasets[1].data = data.metrics.val_f1s.map(v => v || 0);
-        }
-        
-        lossChart.update();
-        accuracyChart.update();
+        metricsChart.data.datasets[0].data = fillMetric(data.metrics.val_accuracies);
+        metricsChart.data.datasets[1].data = fillMetric(data.metrics.val_recalls);
+        metricsChart.data.datasets[2].data = fillMetric(data.metrics.val_precisions);
+        metricsChart.data.datasets[3].data = fillMetric(data.metrics.val_f1s);
+        metricsChart.update();
     }
 }
 
-function updateConfusionMatrix(data) {
-    const matrixDiv = document.getElementById('confusion-matrix');
-    if (data.metrics && data.metrics.confusion_matrix) {
-        const matrix = data.metrics.confusion_matrix;
-        let html = '<table style="border-collapse: collapse; margin: 0 auto;">';
-        for (let i = 0; i < matrix.length; i++) {
-            html += '<tr>';
-            for (let j = 0; j < matrix[i].length; j++) {
-                html += `<td style="border: 1px solid #ddd; padding: 8px; text-align: center;">${matrix[i][j]}</td>`;
-            }
-            html += '</tr>';
+function renderConfusionMatrixSettings(matrix) {
+    if (!Array.isArray(matrix) || !matrix.length || !Array.isArray(matrix[0])) return '<div style="color:#888">Нет данных</div>';
+    const n = matrix.length;
+    const m = matrix[0].length;
+    const classLabels = n === 2 ? ['Approve', 'Active'] : n === 3 ? ['Approve', 'Active', 'Reviewed'] : Array.from({length: n}, (_, i) => `Класс ${i}`);
+    let html = `<table class="confusion-matrix"><thead><tr><th>Прогноз \\ Факт</th>`;
+    for (let j = 0; j < m; j++) {
+        html += `<th>${classLabels[j]}</th>`;
+    }
+    html += `</tr></thead><tbody>`;
+    for (let i = 0; i < n; i++) {
+        html += `<tr><th>${classLabels[i]}</th>`;
+        for (let j = 0; j < m; j++) {
+            const value = matrix[i][j];
+            const isDiagonal = i === j;
+            const cssClass = isDiagonal ? 'tp' : 'fp';
+            html += `<td class="${cssClass}">${value}</td>`;
         }
-        html += '</table>';
-        matrixDiv.innerHTML = html;
+        html += `</tr>`;
+    }
+    html += `</tbody></table>`;
+    return html;
+}
+
+function updateConfusionMatrix(data) {
+    const block = document.getElementById('confusion-matrix-block');
+    const matrixDiv = document.getElementById('confusion-matrix');
+    if (data.status === 'done' && data.metrics && Array.isArray(data.metrics.confusion_matrix) && data.metrics.confusion_matrix.length > 0) {
+        block.style.display = '';
+        matrixDiv.innerHTML = renderConfusionMatrixSettings(data.metrics.confusion_matrix);
+    } else {
+        block.style.display = 'none';
+        matrixDiv.innerHTML = '';
     }
 }
 
@@ -244,4 +273,4 @@ document.addEventListener('DOMContentLoaded', function() {
     updateInterval = setInterval(updateProgress, 1000);
 });
 </script>
-{% endblock %} 
+{% endblock %}

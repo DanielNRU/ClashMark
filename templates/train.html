@@ -475,4 +475,37 @@ if (infoModal) {
     };
 }
 </script>
+<script>
+// Обработка сабмита формы обучения (AJAX)
+const trainForm = document.getElementById('trainForm');
+if (trainForm) {
+    trainForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        document.getElementById('errorContainer').style.display = 'none';
+        document.getElementById('loadingIndicator').style.display = 'block';
+        // Собираем данные формы
+        const formData = new FormData(trainForm);
+        // Добавляем выбранные файлы вручную
+        const xmlInput = document.getElementById('trainXmlInput');
+        const zipInput = document.getElementById('trainZipInput');
+        for (const file of xmlInput.files) formData.append('xml_file', file);
+        for (const file of zipInput.files) formData.append('zip_file', file);
+        try {
+            const resp = await fetch('/api/train', { method: 'POST', body: formData });
+            const data = await resp.json();
+            if (data.success) {
+                window.location.href = '/train_progress';
+            } else {
+                document.getElementById('loadingIndicator').style.display = 'none';
+                document.getElementById('errorContainer').style.display = 'block';
+                document.getElementById('errorContainer').innerText = data.error || 'Ошибка запуска обучения';
+            }
+        } catch (err) {
+            document.getElementById('loadingIndicator').style.display = 'none';
+            document.getElementById('errorContainer').style.display = 'block';
+            document.getElementById('errorContainer').innerText = 'Ошибка отправки формы: ' + err.message;
+        }
+    });
+}
+</script>
 {% endblock %} 

@@ -123,7 +123,11 @@ function renderCategoryPairsTable(pairs, sortCol = 2, sortDir = 'desc') {
 }
 // Пример функции для обновления прогресса (можно вызывать через fetch)
 function updateTrainProgress(metrics) {
-    renderTrainCharts(metrics);
+    const nEpochs = metrics.train_losses ? metrics.train_losses.length : 0;
+    renderTrainCharts({
+        ...metrics,
+        epochs: Array.from({length: nEpochs}, (_, i) => i + 1)
+    });
     renderMetricsList(metrics);
     renderConfusionMatrix(metrics.confusion_matrix);
 }

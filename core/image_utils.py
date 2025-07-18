@@ -1,6 +1,8 @@
 import os
 import unicodedata
 import logging
+import hashlib
+import pickle
 
 def normalize_filename(name):
     name = name.strip().lower()
@@ -51,3 +53,60 @@ def find_image_by_name(image_href, session_dir):
                 return candidate
     logging.warning(f"[find_image_by_name] Не найдено: {rel_path} (session_dir={session_dir})")
     return None 
+
+def build_image_index(session_dir, exts=(".jpg", ".jpeg", ".png", ".bmp")):
+    index = {}
+    for root, dirs, files in os.walk(session_dir):
+        for file in files:
+            if file.lower().endswith(exts):
+                index[file.lower()] = os.path.join(root, file)
+    return index
+
+def get_dir_hash(directory):
+    hash_md5 = hashlib.md5()
+    for root, dirs, files in os.walk(directory):
+        for file in sorted(files):
+            path = os.path.join(root, file)
+            try:
+                stat = os.stat(path)
+                hash_md5.update(file.encode())
+                hash_md5.update(str(stat.st_size).encode())
+            except Exception:
+                continue
+    return hash_md5.hexdigest()
+
+def build_image_index_with_cache(session_dir, exts=(".jpg", ".jpeg", ".png", ".bmp"), cache_dir=".image_index_cache"):
+    os.makedirs(cache_dir, exist_ok=True)
+    dir_hash = get_dir_hash(session_dir)
+    cache_path = os.path.join(cache_dir, f"index_{dir_hash}.pkl")
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, 'rb') as f:
+                return pickle.load(f)
+        except Exception:
+            pass
+    index = build_image_index(session_dir, exts=exts)
+    try:
+        with open(cache_path, 'wb') as f:
+            pickle.dump(index, f)
+    except Exception:
+        pass
+    return index
+
+def find_image_by_name_optimized(image_href, image_index):
+    if not image_href or not image_index:
+        return None
+    filename = os.path.basename(get_relative_image_path(image_href)).lower()
+    return image_index.get(filename)
+
+def resolve_images_vectorized_series(image_hrefs, image_index, images_dir):
+    def resolve_one(href):
+        if not href:
+            return ''
+        rel_path = get_relative_image_path(href)
+        abs_path = os.path.join(images_dir, rel_path)
+        if abs_path and os.path.exists(abs_path):
+            return abs_path
+        image_name = os.path.basename(href)
+        return image_index.get(image_name.lower(), '')
+    return image_hrefs.map(resolve_one) 
