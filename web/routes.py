@@ -237,9 +237,15 @@ def api_settings():
 @app.route('/analyze', methods=['POST'])
 def analyze_files():
     try:
+        import pandas as pd
+        import torch
+        import time
+        from core.image_utils import build_image_index_with_cache, resolve_images_vectorized_series
+        from core.xml_utils import get_pairs_vectorized, filter_valid_images
+        from ml.model import get_cached_model, create_model
+        from ml.dataset import create_transforms
         xml_files = request.files.getlist('xml_file')
         zip_files = request.files.getlist('images_zip')
-        # Загружаем настройки заранее
         settings = load_settings()
         export_format = settings.get('export_format', 'standard')
         inference_mode = settings.get('inference_mode', 'model')
@@ -254,21 +260,15 @@ def analyze_files():
         }
         if not xml_files:
             return jsonify({'error': 'Не выбраны XML файлы!', 'analysis_settings': analysis_settings})
-        # Для стандартного формата требуем ZIP архивы, для BIM Step - не обязательно
         if export_format == 'standard' and not zip_files:
             return jsonify({'error': 'Для стандартного формата необходимо загрузить ZIP архивы с изображениями!', 'analysis_settings': analysis_settings})
-        
-        # Создаем временную папку для сессии
         session_dir = tempfile.mkdtemp(prefix='analysis_session_')
         session_id = os.path.basename(session_dir)
         session_dirs[session_id] = session_dir
-        
         xml_paths = []
         zip_paths = []
         original_xml_names = []
         xml_path_name_pairs = []
-        
-        # Сохраняем XML файлы
         for xml_file in xml_files:
             if not xml_file.filename:
                 continue
@@ -278,8 +278,6 @@ def analyze_files():
             xml_paths.append(xml_path)
             original_xml_names.append(os.path.splitext(safe_filename)[0])
             xml_path_name_pairs.append((xml_path, safe_filename))
-        
-        # Обрабатываем ZIP файлы только если они загружены
         if zip_files:
             for zip_file in zip_files:
                 if not zip_file.filename:
@@ -287,133 +285,98 @@ def analyze_files():
                 zip_path = os.path.join(session_dir, safe_filename_with_cyrillic(zip_file.filename))
                 zip_file.save(zip_path)
                 zip_paths.append(zip_path)
-            
-            # Распаковываем ZIP файлы
             for zip_path in zip_paths:
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                     zip_ref.extractall(session_dir)
-        
-        # Собираем датасет
-        df = collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_format=export_format, manual_review_enabled=manual_review_enabled)
-        
-        if df.empty:
+        # Оптимизированная часть: индекс изображений
+        t1 = time.perf_counter()
+        image_index = build_image_index_with_cache(session_dir)
+        logger.info(f"[TIME] Индексация изображений: {time.perf_counter() - t1:.2f} сек")
+        df = []
+        for xml_path, safe_filename in xml_path_name_pairs:
+            df_part = parse_xml_data(xml_path, export_format=export_format)
+            if len(df_part) == 0:
+                continue
+            df_part['source_file'] = safe_filename
+            df.append(df_part)
+        if not df:
             return jsonify({'error': 'Не удалось обработать XML файлы!', 'analysis_settings': analysis_settings})
-        
-        # Загружаем категории пар
+        df = pd.concat(df, ignore_index=True)
+        # Алгоритмическая разметка
         pairs = load_all_category_pairs('category_pairs.yaml')
         can_pairs = set()
         cannot_pairs = set()
         visual_pairs = set()
-        
         if 'can' in pairs and isinstance(pairs['can'], list):
             for pair in pairs['can']:
                 if isinstance(pair, list) and len(pair) == 2:
                     a, b = pair
                     can_pairs.add((a, b) if a <= b else (b, a))
-        
         if 'cannot' in pairs and isinstance(pairs['cannot'], list):
             for pair in pairs['cannot']:
                 if isinstance(pair, list) and len(pair) == 2:
                     a, b = pair
                     cannot_pairs.add((a, b) if a <= b else (b, a))
-        
         if 'visual' in pairs and isinstance(pairs['visual'], list):
             for pair in pairs['visual']:
                 if isinstance(pair, list) and len(pair) == 2:
                     a, b = pair
                     visual_pairs.add((a, b) if a <= b else (b, a))
-        
-        # Алгоритм распределяет коллизии
-        df['cv_prediction'] = None
-        df['cv_confidence'] = None
-        df['prediction_source'] = None
-        df['cv_status'] = None # Добавляем колонку для статуса
-        
-        visual_rows = []
-        visual_indices = []
-        
-        for idx, row in df.iterrows():
-            pair = get_pair(row)
-            if pair in can_pairs:
-                # can -> Approved
-                df.at[idx, 'cv_prediction'] = 0  # Approved
-                df.at[idx, 'cv_confidence'] = 1.0
-                df.at[idx, 'prediction_source'] = 'algorithm'
-                df.at[idx, 'cv_status'] = 'Approved'
-            elif pair in cannot_pairs:
-                # cannot -> Active
-                df.at[idx, 'cv_prediction'] = 1  # Active
-                df.at[idx, 'cv_confidence'] = 1.0
-                df.at[idx, 'prediction_source'] = 'algorithm'
-                df.at[idx, 'cv_status'] = 'Active'
-            elif pair in visual_pairs:
-                # visual - требует дополнительной обработки
-                df.at[idx, 'cv_prediction'] = -1  # visual (временно)
-                df.at[idx, 'cv_confidence'] = 0.5
-                df.at[idx, 'prediction_source'] = 'algorithm'
-                df.at[idx, 'cv_status'] = 'Reviewed' # По умолчанию для visual
-                visual_rows.append(row)
-                visual_indices.append(idx)
+        pairs_series = get_pairs_vectorized(df)
+        mask_can = pairs_series.isin(list(can_pairs))
+        mask_cannot = pairs_series.isin(list(cannot_pairs))
+        mask_visual = pairs_series.isin(list(visual_pairs))
+        mask_unknown = ~(mask_can | mask_cannot | mask_visual)
+        df['cv_prediction'] = -1
+        df['cv_confidence'] = 0.5
+        df['prediction_source'] = 'algorithm'
+        df['cv_status'] = 'Reviewed'
+        df.loc[mask_can, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [0, 1.0, 'algorithm', 'Approved']
+        df.loc[mask_cannot, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [1, 1.0, 'algorithm', 'Active']
+        # Только теперь вычисляем image_file для нужных строк
+        need_images_mask = (df['cv_prediction'] == -1)
+        if need_images_mask.any():
+            df_need_images = df.loc[need_images_mask].copy()
+            if 'image_href' in df_need_images.columns:
+                df.loc[need_images_mask, 'image_file'] = resolve_images_vectorized_series(df_need_images['image_href'], image_index, session_dir)
             else:
-                # Неизвестная пара - считаем visual
-                df.at[idx, 'cv_prediction'] = -1  # visual
-                df.at[idx, 'cv_confidence'] = 0.5
-                df.at[idx, 'prediction_source'] = 'algorithm'
-                df.at[idx, 'cv_status'] = 'Reviewed' # По умолчанию для visual
-                visual_rows.append(row)
-                visual_indices.append(idx)
-        
-        # Обрабатываем visual коллизии
-        if visual_rows:
+                df.loc[need_images_mask, 'image_file'] = ''
+            df.loc[need_images_mask, :] = filter_valid_images(df.loc[need_images_mask, :])
+        if df.empty:
+            return jsonify({'error': 'Не удалось обработать XML файлы!', 'analysis_settings': analysis_settings})
+        # Повторная загрузка пар не требуется
+        visual_mask = mask_visual | mask_unknown
+        if visual_mask.any():
             if inference_mode == 'model':
-                # Используем модель для разметки visual коллизий
-                import torch
                 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-                visual_df = pd.DataFrame(visual_rows)
+                visual_df = df.loc[visual_mask].copy()
                 transform = create_transforms(is_training=False)
-                model = create_model(device)
                 model_path = os.path.join('model', settings.get('model_file', 'model_clashmark.pt'))
-                model.load_state_dict(torch.load(model_path, map_location=device))
+                model = get_cached_model(device, model_path)
                 model.to(device)
                 model.eval()
-                # Используем пороги уверенности из настроек
                 visual_pred_df = predict(model, device, visual_df, transform, 
                                        low_confidence_threshold=low_confidence, 
                                        high_confidence_threshold=high_confidence,
                                        session_dir=session_dir)
-                for i, idx in enumerate(visual_indices):
+                for i, idx in enumerate(visual_mask[visual_mask].index):
                     prediction = int(visual_pred_df.iloc[i]['cv_prediction'])
                     confidence = float(visual_pred_df.iloc[i]['cv_confidence'])
                     if prediction == -1:
-                        # Модель сомневается - явно присваиваем Reviewed
-                        df.at[idx, 'cv_prediction'] = -1  # visual -> Reviewed
+                        df.at[idx, 'cv_prediction'] = -1
                         df.at[idx, 'cv_confidence'] = confidence
                         df.at[idx, 'prediction_source'] = 'model_uncertain'
                         df.at[idx, 'cv_status'] = 'Reviewed'
                     else:
-                        # Модель уверена
-                        df.at[idx, 'cv_prediction'] = prediction  # 0 -> Approved, 1 -> Active
+                        df.at[idx, 'cv_prediction'] = prediction
                         df.at[idx, 'cv_confidence'] = confidence
                         df.at[idx, 'prediction_source'] = 'model'
                         df.at[idx, 'cv_status'] = 'Approved' if prediction == 0 else 'Active'
             elif manual_review_enabled:
-                # Режим ручной разметки - оставляем visual для ручной обработки
-                for idx in visual_indices:
-                    df.at[idx, 'cv_prediction'] = -1  # visual -> Reviewed (для ручной разметки)
-                    df.at[idx, 'cv_confidence'] = 0.5
-                    df.at[idx, 'prediction_source'] = 'manual_review'
-                    df.at[idx, 'cv_status'] = 'Reviewed'
+                df.loc[visual_mask, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [-1, 0.5, 'manual_review', 'Reviewed']
             else:
-                # Ни модель, ни ручная разметка не используются - все visual -> Reviewed
-                for idx in visual_indices:
-                    df.at[idx, 'cv_prediction'] = -1  # visual -> Reviewed
-                    df.at[idx, 'cv_confidence'] = 0.5
-                    df.at[idx, 'prediction_source'] = 'algorithm'
-                    df.at[idx, 'cv_status'] = 'Reviewed'
-        
-        # Применяем ручную разметку к общему DataFrame для корректного подсчета статистики и экспорта
+                df.loc[visual_mask, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [-1, 0.5, 'algorithm', 'Reviewed']
         df_with_manual = apply_manual_review(df, session_dir)
-        
         # --- Все дальнейшие действия (экспорт, статистика) только по df_with_manual ---
         # Логируем статистику после применения ручной разметки
         total_approved = int((df_with_manual['cv_prediction'] == 0).sum())
@@ -1100,7 +1063,12 @@ def train():
 
 @app.route('/train_progress')
 def train_progress_page():
-    return render_template('train_progress.html')
+    from web.progress import load_train_progress
+    global last_train_temp_dir
+    progress = {}
+    if last_train_temp_dir:
+        progress = load_train_progress(last_train_temp_dir)
+    return render_template('train_progress.html', progress=progress)
 
 @app.route('/api/train', methods=['POST'])
 def api_train():
@@ -1190,6 +1158,9 @@ def api_train():
                     a, b = pair
                     visual_pairs.add((a, b) if a <= b else (b, a))
         df_visual = df[df.apply(lambda row: get_pair(row) in visual_pairs, axis=1)].copy()
+        # Убедимся, что df_visual — DataFrame
+        if not isinstance(df_visual, pd.DataFrame):
+            df_visual = pd.DataFrame(df_visual)
         if len(df_visual) == 0:
             return jsonify({'error': 'Нет подходящих коллизий для обучения модели (Approved и Active)!'})
         if 'image_file' not in df_visual.columns:
@@ -1211,20 +1182,20 @@ def api_train():
             'log': '',
             'started': False
         }, session_dir)
-        def progress_callback(epoch, batch, total_batches, train_loss, val_loss, val_acc, f1, recall, precision=None):
+        def progress_callback(epoch, batch, total_batches, train_loss, val_loss, val_acc, f1, recall, precision=None, update_metrics=True):
             prog = load_train_progress(session_dir)
             # Инициализация массивов метрик, если их нет
             for key in ['train_losses', 'val_losses', 'val_accuracies', 'val_f1s', 'val_recalls', 'val_precisions']:
                 if 'metrics' not in prog or key not in prog['metrics']:
                     prog.setdefault('metrics', {})[key] = []
-            # Добавлять значения в массивы только на последнем батче эпохи и только если метрики не None
-            if batch == total_batches - 1 and val_loss is not None and val_acc is not None and f1 is not None and recall is not None and precision is not None:
+            # Добавлять значения в массивы только если update_metrics=True (раз в эпоху)
+            if update_metrics:
                 prog['metrics']['train_losses'].append(float(train_loss))
-                prog['metrics']['val_losses'].append(float(val_loss))
-                prog['metrics']['val_accuracies'].append(float(val_acc))
-                prog['metrics']['val_f1s'].append(float(f1))
-                prog['metrics']['val_recalls'].append(float(recall))
-                prog['metrics']['val_precisions'].append(float(precision))
+                prog['metrics']['val_losses'].append(float(val_loss) if val_loss is not None else 0)
+                prog['metrics']['val_accuracies'].append(float(val_acc) if val_acc is not None else 0)
+                prog['metrics']['val_f1s'].append(float(f1) if f1 is not None else 0)
+                prog['metrics']['val_recalls'].append(float(recall) if recall is not None else 0)
+                prog['metrics']['val_precisions'].append(float(precision) if precision is not None else 0)
             # last_* значения обновлять всегда
             prog.update({
                 'status': 'in_progress',
@@ -1247,7 +1218,7 @@ def api_train():
             update_train_progress(prog, session_dir)
         def train_job():
             try:
-                metrics = train_model(df_visual, epochs=epochs, batch_size=batch_size, progress_callback=progress_callback)
+                metrics = train_model(df_visual, epochs=epochs, batch_size=batch_size, progress_callback=progress_callback, model_filename=model_name)
                 if metrics is None:
                     update_train_progress({'status': 'error', 'log': 'Обучение не запущено: в обучающей выборке только один класс!'}, session_dir)
                     return
@@ -1265,7 +1236,34 @@ def api_train():
                 stats_path = os.path.join('model', f'{model_name}_stats.json')
                 with open(stats_path, 'w', encoding='utf-8') as f:
                     json.dump(stats, f, ensure_ascii=False, indent=2, default=str)
-                update_train_progress({'status': 'done', 'metrics': metrics}, session_dir)
+                # --- Запись в model_train_log.json ---
+                log_path = os.path.join('model', 'model_train_log.json')
+                log_entry = {
+                    "train_time": stats['train_time'],
+                    "model_file": stats['model_file'],
+                    "final_accuracy": stats['metrics'].get('final_accuracy'),
+                    "final_f1": stats['metrics'].get('final_f1'),
+                    "final_recall": stats['metrics'].get('final_recall'),
+                    "final_precision": stats['metrics'].get('final_precision'),
+                    "confusion_matrix": stats['metrics'].get('confusion_matrix'),
+                    "epochs": stats['epochs'],
+                    "batch_size": stats['batch_size']
+                }
+                if os.path.exists(log_path):
+                    with open(log_path, 'r', encoding='utf-8') as f:
+                        logs = json.load(f)
+                    if not isinstance(logs, list):
+                        logs = [logs]
+                else:
+                    logs = []
+                logs.append(log_entry)
+                with open(log_path, 'w', encoding='utf-8') as f:
+                    json.dump(logs, f, ensure_ascii=False, indent=2)
+                # --- Конец записи в лог ---
+                prog = load_train_progress(session_dir)
+                prog['status'] = 'done'
+                prog['metrics'] = metrics
+                update_train_progress(prog, session_dir)
             except Exception as e:
                 logger.error(f"Ошибка обучения: {e}")
                 update_train_progress({'status': 'error', 'log': f'Ошибка обучения: {str(e)}'}, session_dir)

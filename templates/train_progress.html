@@ -14,7 +14,7 @@
     </div>
     <div id="train-metrics" class="progress-block">
         <h3>Метрики</h3>
-        <ul id="metrics-list"></ul>
+        <table id="metrics-table"></table>
     </div>
     <div id="confusion-matrix-block" class="progress-block">
         <h3>Матрица ошибок</h3>
@@ -32,24 +32,59 @@
 </div>
 
 <style>
-.cm-table {
-    border-collapse: collapse;
-    margin: 12px 0;
+.confusion-matrix {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 2px 16px #0001;
+    overflow: hidden;
+    margin-bottom: 24px;
+    font-size: 16px;
+    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
 }
-.cm-table th, .cm-table td {
-    border: 1px solid #bfc8da;
-    padding: 8px 14px;
+.confusion-matrix th, .confusion-matrix td {
+    padding: 16px 20px;
     text-align: center;
-    font-size: 1.1em;
-}
-.cm-table th {
-    background: #e6eaf2;
-    color: #1a2a4f;
+    border: none;
     font-weight: 600;
+    transition: background 0.2s;
 }
-.cm-table td { background: #f4f6fa; }
-.cm-table .cm-true { background: #e9fbe9; color: #357a38; font-weight: 600; }
-.cm-table .cm-false { background: #ffeaea; color: #b71c1c; font-weight: 600; }
+.confusion-matrix th {
+    background: #23408e;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+.confusion-matrix th:hover {
+    background: #1a2a4f;
+}
+.confusion-matrix tr {
+    transition: background 0.2s;
+}
+.confusion-matrix tr:hover {
+    background: #f0f4fa;
+}
+.confusion-matrix td {
+    border-bottom: 1px solid #e9ecef;
+    background: #fff;
+    color: #23408e;
+    font-weight: 600;
+    font-size: 18px;
+}
+.confusion-matrix tr:last-child td {
+    border-bottom: none;
+}
+.confusion-matrix .tp, .confusion-matrix .tn {
+    background: #e8f5e8 !important;
+    color: #2e7d32 !important;
+}
+.confusion-matrix .fp, .confusion-matrix .fn {
+    background: #fce4ec !important;
+    color: #c2185b !important;
+}
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -66,16 +101,52 @@ function closeInfo() {
     document.getElementById('infoModal').style.display = 'none';
 }
 
+function updateMetricsTable(data) {
+    const table = document.getElementById('metrics-table');
+    const nEpochs = data.total_epochs || (data.metrics && data.metrics.train_losses ? data.metrics.train_losses.length : 0);
+    if (!data.metrics || nEpochs === 0) {
+        table.innerHTML = '<tr><td style="color:#888">Нет данных</td></tr>';
+        return;
+    }
+    function fmt(val) {
+        if (val === undefined || val === null || val === '-') return '-';
+        const num = Number(val);
+        if (isNaN(num)) return val;
+        return num.toFixed(3);
+    }
+    let html = '<thead><tr>' +
+        '<th>Эпоха</th>' +
+        '<th>Train Loss</th>' +
+        '<th>Val Loss</th>' +
+        '<th>Val Accuracy</th>' +
+        '<th>F1</th>' +
+        '<th>Recall</th>' +
+        '<th>Precision</th>' +
+        '</tr></thead><tbody>';
+    for (let i = 0; i < nEpochs; i++) {
+        html += '<tr>' +
+            `<td>${i+1}</td>` +
+            `<td>${fmt(data.metrics.train_losses && data.metrics.train_losses[i])}</td>` +
+            `<td>${fmt(data.metrics.val_losses && data.metrics.val_losses[i])}</td>` +
+            `<td>${fmt(data.metrics.val_accuracies && data.metrics.val_accuracies[i])}</td>` +
+            `<td>${fmt(data.metrics.val_f1s && data.metrics.val_f1s[i])}</td>` +
+            `<td>${fmt(data.metrics.val_recalls && data.metrics.val_recalls[i])}</td>` +
+            `<td>${fmt(data.metrics.val_precisions && data.metrics.val_precisions[i])}</td>` +
+            '</tr>';
+    }
+    html += '</tbody>';
+    table.innerHTML = html;
+}
+
 function updateProgress() {
     fetch('/api/train_progress')
         .then(response => response.json())
         .then(data => {
             updateStatus(data);
-            updateMetrics(data);
             updateGraphs(data);
+            updateMetricsTable(data);
             updateConfusionMatrix(data);
             updateLog(data);
-            
             if (data.status === 'done' || data.status === 'error') {
                 clearInterval(updateInterval);
             }
@@ -87,6 +158,12 @@ function updateProgress() {
 
 function updateStatus(data) {
     const statusDiv = document.getElementById('train-status');
+    function fmt(val) {
+        if (val === undefined || val === null || val === '-') return '-';
+        const num = Number(val);
+        if (isNaN(num)) return val;
+        return num.toFixed(3);
+    }
     if (data.status === 'start') {
         statusDiv.innerHTML = '<h3>Статус обучения</h3><p>Подготовка к обучению...</p>';
     } else if (data.status === 'done') {
@@ -98,37 +175,25 @@ function updateStatus(data) {
             <h3>Статус обучения</h3>
             <p>Эпоха: ${data.epoch}/${data.total_epochs}</p>
             <p>Батч: ${data.batch}/${data.total_batches}</p>
-            <p>Потери: ${data.loss}</p>
+            <p>Потери: ${fmt(data.loss)}</p>
         `;
     }
 }
 
-function updateMetrics(data) {
-    const metricsList = document.getElementById('metrics-list');
-    if (data.metrics && data.metrics.train_losses && data.metrics.val_losses) {
-        let html = '';
-        const n = data.metrics.train_losses.length;
-        for (let i = 0; i < n; i++) {
-            html += `<li>Эпоха ${i+1}: Train Loss: ${Number(data.metrics.train_losses[i]).toFixed(3)} | Val Loss: ${Number(data.metrics.val_losses[i]).toFixed(3)} | Val Accuracy: ${Number(data.metrics.val_accuracies[i]).toFixed(3)} | F1: ${Number(data.metrics.val_f1s[i]).toFixed(3)} | Recall: ${Number(data.metrics.val_recalls[i]).toFixed(3)} | Precision: ${Number(data.metrics.val_precisions[i]).toFixed(3)}</li>`;
-        }
-        metricsList.innerHTML = html;
-    }
-}
-
 function updateGraphs(data) {
+    const nEpochs = data.total_epochs || (data.metrics && data.metrics.train_losses ? data.metrics.train_losses.length : 0);
     if (data.metrics && data.metrics.val_accuracies && data.metrics.val_recalls && data.metrics.val_precisions && data.metrics.val_f1s) {
-        const totalEpochs = data.total_epochs || data.metrics.val_accuracies.length;
         if (!metricsChart) {
             const ctx = document.getElementById('metricsChart').getContext('2d');
             metricsChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: Array.from({length: totalEpochs}, (_, i) => i + 1),
+                    labels: Array.from({length: nEpochs}, (_, i) => i + 1),
                     datasets: [
-                        {label: 'Accuracy', data: Array(totalEpochs).fill(null), borderColor: '#4caf50', backgroundColor: 'rgba(76, 175, 80, 0.1)', tension: 0.1},
-                        {label: 'Recall', data: Array(totalEpochs).fill(null), borderColor: '#ff9800', backgroundColor: 'rgba(255, 152, 0, 0.1)', tension: 0.1},
-                        {label: 'Precision', data: Array(totalEpochs).fill(null), borderColor: '#009688', backgroundColor: 'rgba(0, 150, 136, 0.1)', tension: 0.1},
-                        {label: 'F1', data: Array(totalEpochs).fill(null), borderColor: '#2196f3', backgroundColor: 'rgba(33, 150, 243, 0.1)', tension: 0.1}
+                        {label: 'Accuracy', data: Array(nEpochs).fill(null), borderColor: '#4caf50', backgroundColor: 'rgba(76, 175, 80, 0.1)', tension: 0.1},
+                        {label: 'Recall', data: Array(nEpochs).fill(null), borderColor: '#ff9800', backgroundColor: 'rgba(255, 152, 0, 0.1)', tension: 0.1},
+                        {label: 'Precision', data: Array(nEpochs).fill(null), borderColor: '#009688', backgroundColor: 'rgba(0, 150, 136, 0.1)', tension: 0.1},
+                        {label: 'F1', data: Array(nEpochs).fill(null), borderColor: '#2196f3', backgroundColor: 'rgba(33, 150, 243, 0.1)', tension: 0.1}
                     ]
                 },
                 options: {
@@ -142,10 +207,9 @@ function updateGraphs(data) {
                 }
             });
         }
-        // labels всегда по totalEpochs
-        metricsChart.data.labels = Array.from({length: totalEpochs}, (_, i) => i + 1);
+        metricsChart.data.labels = Array.from({length: nEpochs}, (_, i) => i + 1);
         function fillMetric(arr) {
-            return Array.from({length: totalEpochs}, (_, i) => (arr && arr[i] !== undefined ? arr[i] : null));
+            return Array.from({length: nEpochs}, (_, i) => (arr && arr[i] !== undefined ? arr[i] : null));
         }
         metricsChart.data.datasets[0].data = fillMetric(data.metrics.val_accuracies);
         metricsChart.data.datasets[1].data = fillMetric(data.metrics.val_recalls);
@@ -155,34 +219,36 @@ function updateGraphs(data) {
     }
 }
 
-function renderConfusionMatrix(matrix) {
+function renderConfusionMatrixSettings(matrix) {
     if (!Array.isArray(matrix) || !matrix.length || !Array.isArray(matrix[0])) return '<div style="color:#888">Нет данных</div>';
     const n = matrix.length;
-    const m = Array.isArray(matrix[0]) ? matrix[0].length : 0;
-    if (!m) return '<div style="color:#888">Нет данных</div>';
-    const classLabels = n === 2 ? ['Критичные', 'Некритичные'] : Array.from({length: n}, (_, i) => `Класс ${i}`);
-    let html = '<table class="cm-table">';
-    html += '<tr><th rowspan="2">Факт/Прогноз</th><th colspan="' + m + '">Прогноз</th></tr>';
-    html += '<tr>' + classLabels.map(l => `<th>${l}</th>`).join('') + '</tr>';
+    const m = matrix[0].length;
+    const classLabels = n === 2 ? ['Approve', 'Active'] : n === 3 ? ['Approve', 'Active', 'Reviewed'] : Array.from({length: n}, (_, i) => `Класс ${i}`);
+    let html = `<table class="confusion-matrix"><thead><tr><th>Прогноз \\ Факт</th>`;
+    for (let j = 0; j < m; j++) {
+        html += `<th>${classLabels[j]}</th>`;
+    }
+    html += `</tr></thead><tbody>`;
     for (let i = 0; i < n; i++) {
         html += `<tr><th>${classLabels[i]}</th>`;
         for (let j = 0; j < m; j++) {
-            const val = (matrix[i] && matrix[i][j] !== undefined) ? matrix[i][j] : '';
-            const cellClass = i === j ? 'cm-true' : 'cm-false';
-            html += `<td class="${cellClass}">${val}</td>`;
+            const value = matrix[i][j];
+            const isDiagonal = i === j;
+            const cssClass = isDiagonal ? 'tp' : 'fp';
+            html += `<td class="${cssClass}">${value}</td>`;
         }
-        html += '</tr>';
+        html += `</tr>`;
     }
-    html += '</table>';
+    html += `</tbody></table>`;
     return html;
 }
 
 function updateConfusionMatrix(data) {
     const block = document.getElementById('confusion-matrix-block');
     const matrixDiv = document.getElementById('confusion-matrix');
-    if (data.status === 'done' && data.metrics && data.metrics.confusion_matrix) {
+    if (data.status === 'done' && data.metrics && Array.isArray(data.metrics.confusion_matrix) && data.metrics.confusion_matrix.length > 0) {
         block.style.display = '';
-        matrixDiv.innerHTML = renderConfusionMatrix(data.metrics.confusion_matrix);
+        matrixDiv.innerHTML = renderConfusionMatrixSettings(data.metrics.confusion_matrix);
     } else {
         block.style.display = 'none';
         matrixDiv.innerHTML = '';
@@ -207,4 +273,4 @@ document.addEventListener('DOMContentLoaded', function() {
     updateInterval = setInterval(updateProgress, 1000);
 });
 </script>
-{% endblock %} 
+{% endblock %}

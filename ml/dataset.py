@@ -30,10 +30,19 @@ class CollisionImageDataset(Dataset):
             (self.dataframe['image_file'] != '') &
             self.dataframe['image_file'].astype(str).str.strip() != ''
         ].copy()
+        # Диагностика: если после фильтрации пусто — выбрасываем ошибку
         if len(self.dataframe) == 0:
-            example_href = self.dataframe['image_href'].iloc[0] if 'image_href' in self.dataframe.columns and len(self.dataframe) > 0 else ''
-            rel_path = get_relative_image_path(example_href) if example_href else ''
-            raise ValueError(f"Не найдено валидных изображений для обучения!\nВременная папка: {session_dir}\nПример относительного пути: {rel_path}")
+            raise ValueError(f"Не найдено валидных изображений для обучения!\nВременная папка: {session_dir}")
+        # Выводим первые 10 меток для диагностики
+        label_col = None
+        for col in ['IsResolved', 'label', 'status']:
+            if col in self.dataframe.columns:
+                label_col = col
+                break
+        if label_col:
+            print(f"[DEBUG][CollisionImageDataset] Первые 10 меток ({label_col}):", self.dataframe[label_col].head(10).tolist())
+        else:
+            print("[DEBUG][CollisionImageDataset] Нет ни одной колонки с метками (IsResolved, label, status)!")
         logger.info(f"Загружено {len(self.dataframe)} изображений для обучения")
     
     def __len__(self):
@@ -43,16 +52,18 @@ class CollisionImageDataset(Dataset):
         row = self.dataframe.iloc[idx]
         image_path = row['image_file']
         # Определяем метку и приводим к float
-        if 'status' in row:
-            label = row['status']
-        elif 'IsResolved' in row:
+        if 'IsResolved' in row and not pd.isna(row['IsResolved']):
             label = row['IsResolved']
+        elif 'label' in row and not pd.isna(row['label']):
+            label = row['label']
+        elif 'status' in row and not pd.isna(row['status']):
+            label = row['status']
         else:
-            label = -1  # -1 используется для visual/Reviewed
+            raise ValueError(f"В строке нет метки (IsResolved, label, status): {row}")
         try:
             label = float(label)
         except Exception:
-            label = -1.0
+            raise ValueError(f"Метка не преобразуется в float: {label} (row: {row})")
         try:
             # Проверяем существование файла
             if not os.path.exists(image_path):
