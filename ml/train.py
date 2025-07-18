@@ -110,8 +110,17 @@ def train_model(df, epochs=10, batch_size=16, learning_rate=1e-4, device=None, p
     
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
-    
-    criterion = torch.nn.BCEWithLogitsLoss()
+
+    # --- CLASS WEIGHTS ---
+    labels = train_df['IsResolved'].values
+    n_pos = np.sum(labels == 1)
+    n_neg = np.sum(labels == 0)
+    if n_pos > 0:
+        pos_weight = torch.tensor([n_neg / n_pos], dtype=torch.float32, device=device)
+    else:
+        pos_weight = torch.tensor([1.0], dtype=torch.float32, device=device)
+    print(f"[DEBUG] pos_weight для BCEWithLogitsLoss: {pos_weight.item():.3f}")
+    criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     
     # Инициализируем массивы для метрик

@@ -1161,13 +1161,62 @@ def api_train():
         # Убедимся, что df_visual — DataFrame
         if not isinstance(df_visual, pd.DataFrame):
             df_visual = pd.DataFrame(df_visual)
-        if len(df_visual) == 0:
-            return jsonify({'error': 'Нет подходящих коллизий для обучения модели (Approved и Active)!'})
-        if 'image_file' not in df_visual.columns:
-            return jsonify({'error': 'Колонка image_file не найдена в данных!'})
-        df_visual = df_visual[pd.Series(df_visual['image_file']).notna() & (pd.Series(df_visual['image_file']) != '')]
-        if len(df_visual) == 0:
-            return jsonify({'error': 'Не найдено изображений для обучения!'})
+        # --- АУГМЕНТАЦИЯ КЛАССА-МЕНЬШИНСТВА ---
+        import numpy as np
+        from PIL import Image
+        from PIL.Image import Transpose
+        # Определяем метку: 0 — Approved, 1 — Active
+        if not isinstance(df_visual, pd.DataFrame):
+            df_visual = pd.DataFrame(df_visual)
+        df_visual['label'] = df_visual['status'].apply(lambda x: 0 if x == 'Approved' else (1 if x == 'Active' else None))
+        class_counts = df_visual['label'].value_counts().to_dict()
+        min_class = min(class_counts, key=lambda k: class_counts[k])
+        max_class = max(class_counts, key=lambda k: class_counts[k])
+        n_min = class_counts[min_class]
+        n_max = class_counts[max_class]
+        n_to_add = n_max - n_min
+        AUG_DIR = os.path.join(session_dir, 'BSImages_aug')
+        os.makedirs(AUG_DIR, exist_ok=True)
+        def augment_and_save(row, aug_dir, n_aug):
+            orig_path = row['image_file']
+            base_name = os.path.splitext(os.path.basename(orig_path))[0]
+            ext = os.path.splitext(orig_path)[1]
+            img = Image.open(orig_path).convert('RGB')
+            aug_rows = []
+            for i in range(n_aug):
+                aug_img = img.copy()
+                if np.random.rand() > 0.5:
+                    aug_img = aug_img.transpose(Transpose.FLIP_LEFT_RIGHT)
+                if np.random.rand() > 0.5:
+                    aug_img = aug_img.transpose(Transpose.FLIP_TOP_BOTTOM)
+                angle = np.random.choice([0, 90, 180, 270])
+                if angle != 0:
+                    aug_img = aug_img.rotate(angle)
+                aug_name = f"{base_name}_aug{i}{ext}"
+                aug_path = os.path.join(aug_dir, aug_name)
+                aug_img.save(aug_path)
+                new_row = row.copy()
+                new_row['image_file'] = aug_path
+                new_row['image_href'] = aug_name
+                aug_rows.append(new_row)
+            return aug_rows
+        n_min_rows = df_visual[df_visual['label'] == min_class]
+        if not isinstance(n_min_rows, pd.DataFrame):
+            n_min_rows = pd.DataFrame(n_min_rows)
+        if n_min > 0 and n_to_add > 0:
+            n_aug_per_row = int(np.ceil(n_to_add / n_min))
+            augmented_rows = []
+            for idx, row in n_min_rows.iterrows():
+                n_aug = min(n_aug_per_row, n_to_add - len(augmented_rows))
+                if n_aug <= 0:
+                    break
+                augmented_rows.extend(augment_and_save(row, AUG_DIR, n_aug))
+            df_visual = pd.concat([df_visual, pd.DataFrame(augmented_rows)], ignore_index=True)
+        if 'label' in df_visual.columns:
+            df_visual = df_visual.drop(columns=['label'])
+        # Добавить папку с аугментированными изображениями в images_dirs
+        if AUG_DIR not in images_dirs:
+            images_dirs.insert(0, AUG_DIR)
         model_name = f'model_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pt'
         model_save_path = os.path.join('model', model_name)
         # Инициализация прогресса обучения до запуска потока
