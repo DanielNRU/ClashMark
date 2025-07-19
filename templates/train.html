@@ -338,6 +338,130 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 <script>
+function updatePreviewStats() {
+    const xmlInput = document.querySelector('input[name="xml_file"]');
+    const zipInput = document.querySelector('input[name="zip_file"]');
+    const previewStats = document.getElementById('previewStats');
+    previewStats.style.display = 'none';
+    previewStats.innerHTML = '';
+    if (!xmlInput.files.length) return;
+    const formData = new FormData();
+    for (const file of xmlInput.files) formData.append('xml_file', file);
+    for (const file of zipInput.files) formData.append('zip_file', file);
+    previewStats.innerHTML = '⏳ Анализ файлов...';
+    previewStats.style.display = 'block';
+    fetch('/api/train_preview', { method: 'POST', body: formData })
+        .then(resp => resp.json())
+        .then(data => {
+            if (data.error) {
+                previewStats.innerHTML = `<span style="color:#c62828;">${data.error}</span>`;
+                showCategoryPairsTable([]);
+            } else {
+                const stats = data.stats;
+                let html = `<div class="stats-grid">
+                    <div class="stat-item"><div class="stat-label">XML файлов</div><div class="stat-value">${stats.xml_file_count ?? '—'}</div></div>
+                    <div class="stat-item"><div class="stat-label">ZIP архивов</div><div class="stat-value">${stats.zip_file_count ?? '—'}</div></div>
+                    <div class="stat-item"><div class="stat-label">Коллизий для обучения</div><div class="stat-value">${stats.trainable_collisions ?? '—'}</div></div>
+                    <div class="stat-item"><div class="stat-label">Всего коллизий</div><div class="stat-value">${stats.total_collisions ?? '—'}</div></div>
+                    <div class="stat-item"><div class="stat-label">Пар категорий</div><div class="stat-value">${stats.category_pairs ? stats.category_pairs.length : '—'}</div></div>
+                </div>`;
+                // Детальная статистика по каждому XML
+                if (stats.per_file && stats.per_file.length) {
+                    html += '<table class="xml-stats-table"><thead><tr><th>Файл</th><th>Коллизий</th><th>Active</th><th>Approved</th><th>Reviewed</th></tr></thead><tbody>';
+                    for (const f of stats.per_file) {
+                        html += `<tr><td>${f.file}</td><td>${f.total_collisions}</td><td>${f.active_count}</td><td>${f.approve_count}</td><td>${f.reviewed_count}</td></tr>`;
+                    }
+                    html += '</tbody></table>';
+                }
+                previewStats.innerHTML = html;
+                showCategoryPairsTable(stats.category_pairs || []);
+            }
+        })
+        .catch(e => {
+            previewStats.innerHTML = `<span style='color:#c62828;'>Ошибка предпросмотра: ${e.message}</span>`;
+            showCategoryPairsTable([]);
+        });
+}
+
+function showCategoryPairsTable(pairs) {
+    window.categoryPairsSortCol = window.categoryPairsSortCol ?? 2;
+    window.categoryPairsSortDir = window.categoryPairsSortDir ?? 'desc';
+    window.categoryPairsData = pairs;
+    const searchInput = document.getElementById('categoryPairsSearch');
+    if (pairs && pairs.length) {
+        if (searchInput) searchInput.style.display = '';
+        renderCategoryPairsTable(pairs, window.categoryPairsSortCol, window.categoryPairsSortDir);
+    } else {
+        if (searchInput) searchInput.style.display = 'none';
+        const list = document.getElementById('categoryPairsList');
+        if (list) list.innerHTML = '';
+    }
+}
+
+function renderCategoryPairsTable(pairs, sortCol = 2, sortDir = 'desc') {
+    const container = document.getElementById('categoryPairsList');
+    container.innerHTML = '';
+    if (!pairs || pairs.length === 0) {
+        container.innerHTML = '<div class="empty">Нет пар</div>';
+        return;
+    }
+    const search = (document.getElementById('categoryPairsSearch')?.value || '').toLowerCase();
+    let filtered = pairs.filter(pair =>
+        pair[0].toLowerCase().includes(search) ||
+        pair[1].toLowerCase().includes(search)
+    );
+    filtered.sort((a, b) => {
+        let v1 = a[sortCol], v2 = b[sortCol];
+        if (sortCol === 2) { v1 = +v1; v2 = +v2; }
+        if (v1 < v2) return sortDir === 'asc' ? -1 : 1;
+        if (v1 > v2) return sortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+    let html = '<table class="category-pairs-table"><thead><tr>' +
+        '<th data-col="0">Категория 1</th>' +
+        '<th data-col="1">Категория 2</th>' +
+        '<th data-col="2">Кол-во</th>' +
+        '</tr></thead><tbody>';
+    filtered.forEach(pair => {
+        html += `<tr><td>${pair[0]}</td><td>${pair[1]}</td><td>${pair[2]}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+    // Сортировка по клику
+    const ths = container.querySelectorAll('th[data-col]');
+    ths.forEach(th => {
+        th.onclick = function() {
+            const col = +th.getAttribute('data-col');
+            if (window.categoryPairsSortCol === col) {
+                window.categoryPairsSortDir = window.categoryPairsSortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                window.categoryPairsSortCol = col;
+                window.categoryPairsSortDir = 'desc';
+            }
+            renderCategoryPairsTable(window.categoryPairsData, window.categoryPairsSortCol, window.categoryPairsSortDir);
+        };
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    setupDragDrop('xmlDrop', 'xml_file');
+    setupDragDrop('zipDrop', 'zip_file');
+    updateModelInfo();
+    // Закрытие модального окна
+    document.querySelector('.info-modal-close').onclick = closeInfo;
+    document.getElementById('infoModal').onclick = function(e) { 
+        if (e.target === this) closeInfo(); 
+    };
+    // Поиск по парам категорий
+    const searchInput = document.getElementById('categoryPairsSearch');
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            showCategoryPairsTable(window.categoryPairsData);
+        });
+    }
+});
+
+// Переопределяем handleFileSelect для предпросмотра
 function handleFileSelect(input, containerId) {
     const container = document.getElementById(containerId);
     const files = Array.from(input.files);
@@ -348,50 +472,45 @@ function handleFileSelect(input, containerId) {
         container.innerHTML = 'Файл не выбран';
         container.style.display = 'none';
     }
-    if (typeof updatePreviewStats === 'function') updatePreviewStats();
-}
-</script>
-<script>
-// Drag & Drop функциональность
-function setupDragDrop(dropZoneId, inputName) {
-    const dropZone = document.getElementById(dropZoneId);
-    const input = dropZone.querySelector(`input[name="${inputName}"]`);
-    
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.classList.add('dragover');
-    });
-    
-    dropZone.addEventListener('dragleave', () => {
-        dropZone.classList.remove('dragover');
-    });
-    
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('dragover');
-        
-        const files = Array.from(e.dataTransfer.files);
-        const containerId = inputName === 'xml_file' ? 'xmlFiles' : 'zipFiles';
-        
-        // Обновляем input
-        const dt = new DataTransfer();
-        files.forEach(file => dt.items.add(file));
-        input.files = dt.files;
-        
-        // Обновляем отображение
-        handleFileSelect(input, containerId);
-    });
+    updatePreviewStats();
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-    setupDragDrop('xmlDrop', 'xml_file');
-    setupDragDrop('zipDrop', 'images_zip');
-    updateModelInfo();
-    // Закрытие модального окна
-    document.querySelector('.info-modal-close').onclick = closeInfo;
-    document.getElementById('infoModal').onclick = function(e) { 
-        if (e.target === this) closeInfo(); 
-    };
-});
+// AJAX-отправка формы обучения
+const trainForm = document.getElementById('trainForm');
+if (trainForm) {
+    trainForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const errorContainer = document.getElementById('errorContainer');
+        errorContainer.style.display = 'none';
+        errorContainer.innerHTML = '';
+        const loading = document.getElementById('loadingIndicator');
+        loading.style.display = 'block';
+        const formData = new FormData(trainForm);
+        // Добавляем выбранные файлы
+        const xmlInput = document.querySelector('input[name="xml_file"]');
+        const zipInput = document.querySelector('input[name="zip_file"]');
+        for (const file of xmlInput.files) formData.append('xml_file', file);
+        for (const file of zipInput.files) formData.append('zip_file', file);
+        fetch('/api/train', {
+            method: 'POST',
+            body: formData
+        })
+        .then(resp => resp.json())
+        .then(data => {
+            loading.style.display = 'none';
+            if (data.success) {
+                window.location.href = '/train_progress';
+            } else {
+                errorContainer.innerHTML = data.error || 'Неизвестная ошибка';
+                errorContainer.style.display = 'block';
+            }
+        })
+        .catch(e => {
+            loading.style.display = 'none';
+            errorContainer.innerHTML = 'Ошибка отправки: ' + e.message;
+            errorContainer.style.display = 'block';
+        });
+    });
+}
 </script>
 {% endblock %} 
