@@ -6,7 +6,7 @@ import numpy as np
 from ml.model import create_model
 from ml.dataset import CollisionImageDataset, create_transforms
 from core.xml_utils import parse_xml_data, load_all_category_pairs, get_pair
-from core.image_utils import find_image_by_name
+from core.image_utils import find_image_by_name, get_absolute_image_path_optimized
 import os
 import datetime
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
@@ -26,7 +26,16 @@ def collect_dataset_from_multiple_files(xml_paths, images_dir=None, export_forma
         if not isinstance(df, pd.DataFrame):
             print(f"[DEBUG] Преобразую df в DataFrame после parse_xml_data, type(df)={type(df)}")
             df = pd.DataFrame(df)
-        df['image_file'] = df['image_href'].apply(lambda href: find_image_by_name(href, images_dir) if href else None)
+        def find_image_optimized(href):
+            if not href:
+                return None
+            # Используем оптимизированную функцию поиска
+            path = get_absolute_image_path_optimized(href, images_dir)
+            if not path:
+                # Fallback к старому методу
+                path = find_image_by_name(href, images_dir)
+            return path
+        df['image_file'] = df['image_href'].apply(find_image_optimized)
         df['source_file'] = os.path.basename(xml_path)
         all_dataframes.append(df)
     if not all_dataframes:
@@ -74,12 +83,28 @@ def create_transforms(is_training=True):
             transforms.ToTensor(),
         ])
 
-def train_model(df, epochs=10, batch_size=16, learning_rate=1e-4, device=None, progress_callback=None, model_filename=None):
+def train_model(df, epochs=10, batch_size=16, learning_rate=1e-4, device=None, progress_callback=None, model_filename=None, model_type='mobilenet_v3_small'):
     # --- Фильтрация только по двум классам ---
+    # Проверяем наличие колонки IsResolved
+    if 'IsResolved' not in df.columns:
+        # Если колонки нет, создаем её на основе доступных данных
+        if 'status' in df.columns:
+            df['IsResolved'] = df['status'].apply(
+                lambda x: 1 if x == 'Active' or x == 'Активн.' else (0 if x == 'Approved' or x == 'Подтверждено' else -1)
+            )
+        elif 'resultstatus' in df.columns:
+            df['IsResolved'] = df['resultstatus'].apply(
+                lambda x: 1 if x == 'Активн.' else (0 if x == 'Подтверждено' else -1)
+            )
+        else:
+            print("[ERROR] Не найдена колонка IsResolved, status или resultstatus для определения классов")
+            return None
+    
     df = df[df['IsResolved'].isin([0, 1])].copy()
     
     # Проверяем, что у нас есть оба класса
     if len(df['IsResolved'].unique()) < 2:
+        print(f"[ERROR] Найдено только {len(df['IsResolved'].unique())} класс(ов), требуется 2")
         return None
     
     if device is None:
@@ -102,7 +127,7 @@ def train_model(df, epochs=10, batch_size=16, learning_rate=1e-4, device=None, p
     else:
         print(f"[DEBUG] val_df не DataFrame или нет колонки IsResolved, type(val_df)={type(val_df)}")
     
-    model = create_model(device)
+    model = create_model(device, model_type)
     transform = create_transforms(is_training=True)
     
     train_dataset = CollisionImageDataset(train_df, transform)

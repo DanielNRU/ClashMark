@@ -14,7 +14,7 @@ import threading
 from core.xml_utils import (
     load_all_category_pairs, get_pair, parse_xml_data, export_to_bimstep_xml, export_to_xml, add_bimstep_journal_entry
 )
-from core.image_utils import find_image_by_name, get_relative_image_path
+from core.image_utils import find_image_by_name, get_relative_image_path, get_absolute_image_path_optimized
 from ml.model import create_model
 from ml.dataset import CollisionImageDataset, create_transforms
 from ml.inference import predict, fill_xml_fields
@@ -124,10 +124,10 @@ def collect_dataset_with_session_dir(xml_path_name_pairs, session_dir, export_fo
             if need_images:
                 for idx, row in df_file.iterrows():
                     image_href = row.get('image_href', '')
-                    rel_path = get_relative_image_path(image_href)
-                    image_path = os.path.join(session_dir, rel_path) if rel_path else ''
-                    if not image_path or not os.path.exists(image_path):
-                        # fallback
+                    # Используем оптимизированную функцию поиска
+                    image_path = get_absolute_image_path_optimized(image_href, session_dir)
+                    if not image_path:
+                        # Fallback к старому методу
                         image_name = os.path.basename(image_href)
                         image_path = find_image_by_name(image_name, session_dir)
                     if image_path and os.path.exists(image_path):
@@ -172,6 +172,9 @@ def settings():
             settings['inference_mode'] = request.form.get('inference_mode', 'model')
             settings['export_format'] = request.form.get('export_format', 'standard')
             settings['manual_review_enabled'] = 'manual_review_enabled' in request.form
+            # Добавляем новые настройки
+            settings['model_type'] = request.form.get('model_type', 'mobilenet_v3_small')
+            settings['use_optimization'] = 'use_optimization' in request.form
             save_settings(settings)
             flash('Настройки сохранены!', 'success')
             
@@ -242,7 +245,7 @@ def analyze_files():
         import time
         from core.image_utils import build_image_index_with_cache, resolve_images_vectorized_series
         from core.xml_utils import get_pairs_vectorized, filter_valid_images
-        from ml.model import get_cached_model, create_model
+        from ml.model import get_cached_model, create_model, get_model_info
         from ml.dataset import create_transforms
         xml_files = request.files.getlist('xml_file')
         zip_files = request.files.getlist('images_zip')
@@ -256,7 +259,9 @@ def analyze_files():
             'inference_mode': inference_mode,
             'manual_review_enabled': manual_review_enabled,
             'export_format': export_format,
-            'model_file': settings.get('model_file', 'model_clashmark.pt')
+            'model_file': settings.get('model_file', 'model_clashmark.pt'),
+            'model_type': settings.get('model_type', 'mobilenet_v3_small'),
+            'use_optimization': settings.get('use_optimization', True)
         }
         if not xml_files:
             return jsonify({'error': 'Не выбраны XML файлы!', 'analysis_settings': analysis_settings})
@@ -352,7 +357,21 @@ def analyze_files():
                 visual_df = df.loc[visual_mask].copy()
                 transform = create_transforms(is_training=False)
                 model_path = os.path.join('model', settings.get('model_file', 'model_clashmark.pt'))
-                model = get_cached_model(device, model_path)
+                # --- Получаем архитектуру модели по выбранному файлу ---
+                def get_model_type_for_file(model_file):
+                    log_path = os.path.join('model', 'model_train_log.json')
+                    if model_file and os.path.exists(log_path):
+                        with open(log_path, 'r', encoding='utf-8') as f:
+                            logs = json.load(f)
+                        if isinstance(logs, dict):
+                            logs = [logs]
+                        for entry in logs:
+                            if entry.get('model_file') == model_file:
+                                return entry.get('model_type', 'mobilenet_v3_small')
+                    return 'mobilenet_v3_small'
+                model_type = get_model_type_for_file(settings.get('model_file', 'model_clashmark.pt'))
+                use_optimization = settings.get('use_optimization', True)
+                model = get_cached_model(device, model_path, model_type, use_optimization)
                 model.to(device)
                 model.eval()
                 visual_pred_df = predict(model, device, visual_df, transform, 
@@ -1059,7 +1078,9 @@ def download_file(session_id, filename):
 
 @app.route('/train')
 def train():
-    return render_template('train.html')
+    from web.utils import load_settings
+    settings = load_settings()
+    return render_template('train.html', settings=settings)
 
 @app.route('/train_progress')
 def train_progress_page():
@@ -1145,8 +1166,16 @@ def api_train():
         df_with_images = combined_df[combined_df['image_file'].notna() & combined_df['image_file'].apply(lambda x: x is not None)]
         if not isinstance(df_with_images, pd.DataFrame):
             df_with_images = pd.DataFrame(df_with_images)
+        # Проверяем наличие колонки IsResolved и фильтруем данные
         if 'IsResolved' in df_with_images.columns:
             df_with_images = df_with_images[df_with_images['IsResolved'].isin([0, 1])].copy()
+        else:
+            # Если колонки IsResolved нет, создаем её на основе status
+            df_with_images['IsResolved'] = df_with_images['status'].apply(
+                lambda x: 1 if x == 'Active' or x == 'Активн.' else (0 if x == 'Approved' or x == 'Подтверждено' else -1)
+            )
+            df_with_images = df_with_images[df_with_images['IsResolved'].isin([0, 1])].copy()
+        
         df = df_with_images
         if df.empty:
             return jsonify({'error': 'Не найдено изображений для обучения!'})
@@ -1168,7 +1197,22 @@ def api_train():
         # Определяем метку: 0 — Approved, 1 — Active
         if not isinstance(df_visual, pd.DataFrame):
             df_visual = pd.DataFrame(df_visual)
-        df_visual['label'] = df_visual['status'].apply(lambda x: 0 if x == 'Approved' else (1 if x == 'Active' else None))
+        
+        # Проверяем наличие колонки status и создаем label
+        if 'status' in df_visual.columns:
+            df_visual['label'] = df_visual['status'].apply(
+                lambda x: 0 if x == 'Approved' or x == 'Подтверждено' else (1 if x == 'Active' or x == 'Активн.' else None)
+            )
+        elif 'IsResolved' in df_visual.columns:
+            # Если нет status, но есть IsResolved, используем его
+            df_visual['label'] = df_visual['IsResolved'].apply(
+                lambda x: 0 if x == 0 else (1 if x == 1 else None)
+            )
+        else:
+            # Если нет ни status, ни IsResolved, создаем на основе resultstatus
+            df_visual['label'] = df_visual['resultstatus'].apply(
+                lambda x: 0 if x == 'Подтверждено' else (1 if x == 'Активн.' else None)
+            )
         class_counts = df_visual['label'].value_counts().to_dict()
         min_class = min(class_counts, key=lambda k: class_counts[k])
         max_class = max(class_counts, key=lambda k: class_counts[k])
@@ -1267,7 +1311,29 @@ def api_train():
             update_train_progress(prog, session_dir)
         def train_job():
             try:
-                metrics = train_model(df_visual, epochs=epochs, batch_size=batch_size, progress_callback=progress_callback, model_filename=model_name)
+                # Убеждаемся, что df_visual содержит необходимые колонки
+                if 'IsResolved' not in df_visual.columns:
+                    # Создаем IsResolved на основе доступных данных
+                    if 'status' in df_visual.columns:
+                        df_visual['IsResolved'] = df_visual['status'].apply(
+                            lambda x: 1 if x == 'Active' or x == 'Активн.' else (0 if x == 'Approved' or x == 'Подтверждено' else -1)
+                        )
+                    elif 'resultstatus' in df_visual.columns:
+                        df_visual['IsResolved'] = df_visual['resultstatus'].apply(
+                            lambda x: 1 if x == 'Активн.' else (0 if x == 'Подтверждено' else -1)
+                        )
+                    else:
+                        update_train_progress({'status': 'error', 'log': 'Не найдена колонка IsResolved, status или resultstatus для обучения'}, session_dir)
+                        return
+                
+                # Фильтруем только нужные классы
+                df_visual_filtered = df_visual[df_visual['IsResolved'].isin([0, 1])].copy()
+                if len(df_visual_filtered) == 0:
+                    update_train_progress({'status': 'error', 'log': 'Не найдено данных для обучения (требуются классы 0 и 1)'}, session_dir)
+                    return
+                
+                model_type = settings.get('model_type', 'mobilenet_v3_small')
+                metrics = train_model(df_visual_filtered, epochs=epochs, batch_size=batch_size, progress_callback=progress_callback, model_filename=model_name, model_type=model_type)
                 if metrics is None:
                     update_train_progress({'status': 'error', 'log': 'Обучение не запущено: в обучающей выборке только один класс!'}, session_dir)
                     return
@@ -1358,6 +1424,22 @@ def to_py(obj):
     if isinstance(obj, dict):
         return {k: to_py(v) for k, v in obj.items()}
     return str(obj)
+
+@app.route('/api/model_info')
+def api_model_info():
+    model_file = request.args.get('model_file')
+    log_path = os.path.join('model', 'model_train_log.json')
+    model_type = None
+    if model_file and os.path.exists(log_path):
+        with open(log_path, 'r', encoding='utf-8') as f:
+            logs = json.load(f)
+        if isinstance(logs, dict):
+            logs = [logs]
+        for entry in logs:
+            if entry.get('model_file') == model_file:
+                model_type = entry.get('model_type')
+                break
+    return jsonify({'model_type': model_type or 'mobilenet_v3_small'})
 
 if __name__ == '__main__':
     app.run(debug=True) 

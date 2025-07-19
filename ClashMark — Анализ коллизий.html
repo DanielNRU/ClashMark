@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<!-- saved from url=(0022)http://127.0.0.1:5001/ -->
+<html lang="ru"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <title>ClashMark — Анализ коллизий</title>
+    <link rel="stylesheet" href="./ClashMark — Анализ коллизий_files/style.css">
+    <link rel="icon" type="image/png" href="./ClashMark — Анализ коллизий_files/logo.png">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <header class="main-header">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 64px;">
+            <div class="header-left">
+                <a href="http://127.0.0.1:5001/" class="logo-link"><img src="./ClashMark — Анализ коллизий_files/logo.png" alt="logo" class="logo"></a>
+            </div>
+            <nav class="header-nav">
+                <a href="http://127.0.0.1:5001/" class="nav-link active">Главная</a>
+                <a href="http://127.0.0.1:5001/settings" class="nav-link ">Настройки</a>
+                <a href="http://127.0.0.1:5001/train" class="nav-link ">Обучение</a>
+            </nav>
+        </div>
+    </header>
+    <main class="main-content">
+        
+<div class="page-title">
+    Анализ коллизий
+    <span class="info-icon" onclick="showInfo()" title="Информация о странице">ℹ️</span>
+</div>
+
+<div class="card">
+    <form id="analyzeForm" class="analyze-form">
+        <div class="form-row">
+            <div class="form-group">
+                <label>XML файлы:</label>
+                <div class="file-drop" id="xmlDrop">
+                    <input type="file" name="xml_file" multiple="" accept=".xml" onchange="handleFileSelect(this, &#39;xmlFiles&#39;)">
+                    <div class="file-btns">
+                        <button type="button" class="main-btn" onclick="document.querySelector(&#39;input[name=xml_file]&#39;).click()">
+                            📁 Выбрать XML файлы
+                        </button>
+                    </div>
+                    <div id="xmlFiles" class="selected-files" style="display: none;"></div>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>ZIP архивы с изображениями:</label>
+                <div class="file-drop" id="zipDrop">
+                    <input type="file" name="images_zip" multiple="" accept=".zip" onchange="handleFileSelect(this, &#39;zipFiles&#39;)">
+                    <div class="file-btns">
+                        <button type="button" class="main-btn" onclick="document.querySelector(&#39;input[name=images_zip]&#39;).click()">
+                            📦 Выбрать ZIP архивы
+                        </button>
+                    </div>
+                    <div id="zipFiles" class="selected-files" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="form-row">
+            <button type="submit" class="main-btn accent" id="analyzeBtn">
+                🔍 Начать анализ
+            </button>
+        </div>
+    </form>
+    
+    <!-- Индикатор загрузки -->
+    <div id="loadingIndicator" style="display: none;" class="loading-container">
+        <div class="loading-spinner"></div>
+        <p>Выполняется анализ коллизий...</p>
+        <div id="analysisInfo" style="margin-bottom: 12px; font-size: 15px"></div>
+        <p>Это может занять несколько минут в зависимости от количества файлов.</p>
+    </div>
+    
+    <div id="results" style="display: none;">
+        <h3>Результаты анализа:</h3>
+        <div id="statsContainer"></div>
+        <div id="downloadContainer"></div>
+        
+        <!-- Детальный анализ под спойлером -->
+        <div style="margin-top: 24px;">
+            <details style="background: #f8f9fa; border-radius: 8px; padding: 16px;">
+                <summary style="cursor: pointer; font-weight: 600; color: #23408e; font-size: 16px;">
+                    📊 Детальный анализ по файлам
+                </summary>
+                <div id="detailedAnalysis" style="margin-top: 16px;"></div>
+            </details>
+        </div>
+    </div>
+    
+    <!-- Блок предпросмотра статистики -->
+    <div id="analyzeStats" class="stats-block" style="margin: 24px 0;"></div>
+    <div class="category-pairs-block">
+        <input type="text" id="categoryPairsSearch" placeholder="Поиск по категориям..." class="form-control" style="margin-bottom:12px;max-width:320px;display:none;">
+        <div id="categoryPairsList"></div>
+    </div>
+    <div id="errorContainer" style="display: none;" class="error-block"></div>
+</div>
+
+<!-- Модальное окно для информации -->
+<div id="infoModal" class="info-modal" style="display:none;">
+  <div class="info-modal-content">
+    <span class="info-modal-close" onclick="closeInfo()">×</span>
+    <div id="infoText"></div>
+  </div>
+</div>
+
+    <!-- Модальное окно для ручной разметки -->
+    <div id="manualReviewModal" class="manual-review-modal" style="display:none;">
+        <div class="manual-review-content">
+            <span class="manual-review-close" onclick="closeManualReview()">×</span>
+            <div id="manualReviewNav" style="text-align:center;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:16px;">
+                <button id="manualReviewPrev" class="main-btn" style="min-width:44px;" onclick="manualReviewPrev()">←</button>
+                <span id="manualReviewCounter" style="font-size:15px;color:#23408e;"></span>
+                <button id="manualReviewNext" class="main-btn" style="min-width:44px;" onclick="manualReviewNext()">→</button>
+            </div>
+            <div id="manualReviewImageBlock" style="text-align:center;">
+                <img id="manualReviewImage" src="http://127.0.0.1:5001/" alt="Изображение коллизии" style="max-width:420px;max-height:320px;display:block;margin:0 auto 16px auto;">
+            </div>
+            <div id="manualReviewInfo" style="margin-bottom:16px;text-align:center;"></div>
+            <div style="display:flex;justify-content:center;gap:16px;">
+                <button class="main-btn btn-approved" id="btnApprove" onclick="markManualReview(&#39;Approved&#39;)">Approved</button>
+                <button class="main-btn btn-active" id="btnActive" onclick="markManualReview(&#39;Active&#39;)">Active</button>
+                <button class="main-btn btn-reviewed" id="btnReviewed" onclick="markManualReview(&#39;Reviewed&#39;)">Reviewed</button>
+            </div>
+        </div>
+    </div>
+    <!-- Модальное окно подтверждения завершения ручной разметки -->
+    <div id="manualReviewConfirmModal" class="info-modal" style="display:none; z-index: 11000;">
+      <div class="info-modal-content">
+        <div style="font-size:17px; font-weight:600; margin-bottom:16px;">Завершить ручную разметку?</div>
+        <div style="margin-bottom:20px; color:#23408e;">Вы можете отправить результаты разметки и обновить статистику или продолжить разметку.</div>
+        <div style="display:flex; gap:16px; justify-content:center;">
+          <button id="manualReviewFinishBtn" class="main-btn accent">Завершить разметку</button>
+          <button id="manualReviewContinueBtn" class="main-btn">Продолжить разметку</button>
+        </div>
+      </div>
+    </div>
+    <style>
+    .manual-review-modal {
+        position: fixed; z-index: 10000; left: 0; top: 0; width: 100vw; height: 100vh;
+        background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center;
+    }
+    .manual-review-content {
+        background: #fff; border-radius: 16px; padding: 32px 32px 24px 32px; min-width: 340px; max-width: 520px; box-shadow: 0 4px 32px #0003; position: relative;
+    }
+    .manual-review-close {
+        position: absolute; right: 18px; top: 12px; font-size: 28px; color: #23408e; cursor: pointer;}
+    </style>
+
+<style>
+.loading-container {
+    text-align: center;
+    padding: 40px;
+    background: #f8f9fa;
+    border-radius: 12px;
+    margin: 20px 0;
+}
+
+.loading-spinner {
+    display: inline-block;
+    width: 50px;
+    height: 50px;
+    border: 5px solid #e3e3e3;
+    border-radius: 50%;
+    border-top-color: #23408e;
+    animation: spin 1s ease-in-out infinite;
+    margin-bottom: 20px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading-container p {
+    margin: 10px 0;
+    color: #666;
+    font-size: 14px;
+}
+
+#results {
+    margin-top: 30px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 12px;
+}
+
+#results h3 {
+    color: #23408e;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.stat-item {
+    background: white;
+    padding: 16px;
+    border-radius: 8px;
+    text-align: center;
+    border: 1px solid #e9ecef;
+}
+
+.stat-label {
+    font-size: 12px;
+    color: #6c757d;
+    margin-bottom: 8px;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+.stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: #23408e;
+}
+
+.download-links {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.download-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    text-decoration: none;
+    color: #23408e;
+    transition: all 0.2s;
+}
+
+.download-link:hover {
+    background: #f8f9fa;
+    border-color: #23408e;
+    transform: translateY(-1px);
+}
+
+.download-link .file-name {
+    font-weight: 500;
+}
+
+.download-link .download-icon {
+    font-size: 18px;
+}
+.form-row {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin-bottom: 24px;
+}
+.form-group {
+    min-width: 320px;
+    max-width: 420px;
+    width: 100%;
+    margin: 0 12px;
+}
+.file-drop {
+    width: 100%;
+    max-width: 420px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+input[type="file"] {
+    width: 100%;
+    max-width: 400px;
+    margin-bottom: 12px;
+}
+.selected-files {
+    width: 100%;
+    text-align: left;
+    margin-top: 8px;
+}
+.category-pairs-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 2px 16px #0001;
+    overflow: hidden;
+    margin-bottom: 24px;
+    font-size: 16px;
+}
+.category-pairs-table th, .category-pairs-table td {
+    padding: 16px 20px;
+    text-align: left;
+}
+.category-pairs-table th {
+    background: #23408e;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s;
+}
+.category-pairs-table th:hover {
+    background: #1a2a4f;
+}
+.category-pairs-table tr {
+    transition: background 0.2s;
+}
+.category-pairs-table tr:hover {
+    background: #f0f4fa;
+}
+.category-pairs-table td {
+    border-bottom: 1px solid #e9ecef;
+}
+.category-pairs-table tr:last-child td {
+    border-bottom: none;
+}
+.btn-approved { background: #43a047 !important; color: #fff !important; border: none; }
+.btn-approved:hover { background: #388e3c !important; }
+.btn-active { background: #e53935 !important; color: #fff !important; border: none; }
+.btn-active:hover { background: #b71c1c !important; }
+.btn-reviewed { background: #ff9800 !important; color: #fff !important; border: none; }
+.btn-reviewed:hover { background: #f57c00 !important; }
+
+/* Стили для детального анализа */
+details {
+    border: 1px solid #e9ecef;
+    transition: all 0.2s ease;
+}
+
+details:hover {
+    border-color: #23408e;
+}
+
+details[open] {
+    border-color: #23408e;
+    box-shadow: 0 2px 8px rgba(35, 64, 142, 0.1);
+}
+
+summary {
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    transition: background 0.2s ease;
+}
+
+summary:hover {
+    background: #e9ecef;
+}
+
+#detailedAnalysis {
+    padding: 16px;
+    background: white;
+    border-radius: 8px;
+    margin-top: 16px;
+}
+
+.detailed-file-stats {
+    margin-bottom: 24px;
+    padding: 16px;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+}
+
+.detailed-file-stats h4 {
+    margin: 0 0 16px 0;
+    color: #23408e;
+    font-size: 16px;
+}
+
+.stats-row {
+    display: flex;
+    gap: 16px;
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.stats-label {
+    font-weight: 600;
+    color: #23408e;
+    margin-bottom: 8px;
+}
+
+.stats-approved { color: #43a047; }
+.stats-active { color: #e53935; }
+.stats-reviewed { color: #ff9800; }
+</style>
+
+<script>
+function handleFileSelect(input, containerId) {
+    const container = document.getElementById(containerId);
+    const files = Array.from(input.files);
+    
+    if (files.length > 0) {
+        container.innerHTML = files.map(file => `<div>📄 ${file.name}</div>`).join('');
+        container.style.display = 'block';
+    } else {
+        container.style.display = 'none';
+    }
+    updatePreviewStats();
+}
+
+async function updatePreviewStats() {
+    const xmlInput = document.querySelector('input[name="xml_file"]');
+    const zipInput = document.querySelector('input[name="images_zip"]');
+    const previewStats = document.getElementById('analyzeStats');
+    previewStats.style.display = 'none';
+    previewStats.innerHTML = '';
+
+    if (!xmlInput.files.length) return;
+
+    const formData = new FormData();
+    for (const file of xmlInput.files) formData.append('xml_file', file);
+    for (const file of zipInput.files) formData.append('images_zip', file);
+
+    previewStats.innerHTML = '⏳ Анализ файлов...';
+    previewStats.style.display = 'block';
+
+    try {
+        const resp = await fetch('/api/analyze_preview', { method: 'POST', body: formData });
+        const data = await resp.json();
+        if (data.error) {
+            previewStats.innerHTML = `<span style="color:#c62828;">${data.error}</span>`;
+            showCategoryPairsTable([]);
+        } else {
+            const stats = data.stats;
+            let html = `<div class="stats-grid">
+                <div class="stat-item"><div class="stat-label">XML файлов</div><div class="stat-value">${stats.xml_file_count !== undefined ? stats.xml_file_count : '—'}</div></div>
+                <div class="stat-item"><div class="stat-label">ZIP архивов</div><div class="stat-value">${stats.zip_file_count !== undefined ? stats.zip_file_count : '—'}</div></div>
+                <div class="stat-item"><div class="stat-label">Всего коллизий</div><div class="stat-value">${stats.total_collisions !== undefined ? stats.total_collisions : '—'}</div></div>
+                <div class="stat-item"><div class="stat-label">Пар категорий</div><div class="stat-value">${stats.category_pairs ? stats.category_pairs.length : '—'}</div></div>
+            </div>`;
+            previewStats.innerHTML = html;
+            showCategoryPairsTable(stats.category_pairs || []);
+        }
+    } catch (e) {
+        previewStats.innerHTML = `<span style="color:#c62828;">Ошибка предпросмотра: ${e.message}</span>`;
+        showCategoryPairsTable([]);
+    }
+}
+
+function showInfo() {
+    document.getElementById('infoText').innerText = 'Загрузите XML файлы с коллизиями и ZIP архивы с изображениями. Система автоматически найдет соответствующие изображения для каждой коллизии и выполнит анализ с помощью алгоритма и/или модели машинного обучения.';
+    document.getElementById('infoModal').style.display = 'block';
+}
+
+function closeInfo() {
+    document.getElementById('infoModal').style.display = 'none';
+}
+
+document.getElementById('analyzeForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const loadingIndicator = document.getElementById('loadingIndicator');
+    const results = document.getElementById('results');
+    const errorContainer = document.getElementById('errorContainer');
+    
+    // Показываем индикатор загрузки
+    analyzeBtn.disabled = true;
+    analyzeBtn.innerHTML = 'Анализ выполняется...';
+    loadingIndicator.style.display = 'block';
+    results.style.display = 'none';
+    errorContainer.style.display = 'none';
+    
+    try {
+        const response = await fetch('/analyze', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.error) {
+            errorContainer.innerHTML = `<span class="icon">⚠️</span> ${data.error}`;
+            errorContainer.style.display = 'block';
+        } else {
+            // Отображаем итоговую статистику по всем файлам
+            const statsContainer = document.getElementById('statsContainer');
+            const stats = data.stats_total || {};
+            let statsHtml = `<div class="stats-grid">
+                <div class="stat-item"><div class="stat-label">Файлов</div><div class="stat-value">${stats.total_files ?? '-'}</div></div>
+                <div class="stat-item"><div class="stat-label">Всего коллизий</div><div class="stat-value">${stats.total_collisions ?? '-'}</div></div>
+                <div class="stat-item"><div class="stat-label">Approved</div><div class="stat-value">${stats.total_approved ?? '-'}</div></div>
+                <div class="stat-item"><div class="stat-label">Active</div><div class="stat-value">${stats.total_active ?? '-'}</div></div>
+                <div class="stat-item"><div class="stat-label">Reviewed</div><div class="stat-value">${stats.total_reviewed ?? '-'}</div></div>
+            </div>`;
+            statsContainer.innerHTML = statsHtml;
+            // Отображаем ссылки для скачивания
+            const downloadContainer = document.getElementById('downloadContainer');
+            let downloadHtml = '<h4>📥 Скачать результаты:</h4><div class="download-links">';
+            data.download_links.forEach(link => {
+                downloadHtml += `
+                    <a href="${link.url}" class="download-link">
+                        <span class="file-name">${link.name}</span>
+                        <span class="download-icon">⬇️</span>
+                    </a>
+                `;
+            });
+            downloadHtml += '</div>';
+            downloadContainer.innerHTML = downloadHtml;
+            results.style.display = 'block';
+        }
+        
+    } catch (error) {
+        errorContainer.innerHTML = `<span class="icon">⚠️</span> Ошибка сети: ${error.message}`;
+        errorContainer.style.display = 'block';
+    } finally {
+        // Скрываем индикатор загрузки
+        analyzeBtn.disabled = false;
+        analyzeBtn.innerHTML = '🔍 Начать анализ';
+        loadingIndicator.style.display = 'none';
+    }
+});
+
+// Drag & Drop функциональность
+function setupDragDrop(dropZoneId, inputName) {
+    const dropZone = document.getElementById(dropZoneId);
+    const input = dropZone.querySelector(`input[name="${inputName}"]`);
+    
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+    });
+    
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        
+        const files = Array.from(e.dataTransfer.files);
+        const containerId = inputName === 'xml_file' ? 'xmlFiles' : 'zipFiles';
+        
+        // Обновляем input
+        const dt = new DataTransfer();
+        files.forEach(file => dt.items.add(file));
+        input.files = dt.files;
+        
+        // Обновляем отображение
+        handleFileSelect(input, containerId);
+    });
+}
+
+// Инициализация drag & drop
+document.addEventListener('DOMContentLoaded', function() {
+    setupDragDrop('xmlDrop', 'xml_file');
+    setupDragDrop('zipDrop', 'images_zip');
+    
+    // Закрытие модального окна
+    document.querySelector('.info-modal-close').onclick = closeInfo;
+    document.getElementById('infoModal').onclick = function(e) { 
+        if (e.target === this) closeInfo(); 
+    };
+});
+
+// Модифицируем updatePreviewStats для скрытия поиска до появления таблицы
+function showCategoryPairsTable(pairs) {
+    const searchInput = document.getElementById('categoryPairsSearch');
+    window.categoryPairsSortCol = 2;
+    window.categoryPairsSortDir = 'desc';
+    window.categoryPairsData = pairs;
+    if (pairs && pairs.length) {
+        if (searchInput) searchInput.style.display = '';
+        renderCategoryPairsTable(pairs, window.categoryPairsSortCol, window.categoryPairsSortDir);
+    } else {
+        if (searchInput) searchInput.style.display = 'none';
+        document.getElementById('categoryPairsList').innerHTML = '';
+    }
+}
+document.getElementById('categoryPairsSearch').addEventListener('input', function() {
+    showCategoryPairsTable(window.categoryPairsData);
+});
+</script>
+
+    </main>
+    <script src="./ClashMark — Анализ коллизий_files/scripts.js"></script>
+
+ </body></html>

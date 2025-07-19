@@ -13,12 +13,12 @@
         <canvas id="metricsChart" height="400" width="900" style="display: block; box-sizing: border-box; height: 400px; width: 900px;"></canvas>
     </div>
     <div id="train-metrics" class="progress-block">
-        <h3>Метрики</h3>
-        <table id="metrics-table"></table>
+        <h3>📊 Метрики обучения</h3>
+        <div id="metrics-table"></div>
     </div>
     <div id="confusion-matrix-block" class="progress-block">
-        <h3>Матрица ошибок</h3>
-        <table id="confusion-matrix"></table>
+        <h3>🎯 Матрица ошибок</h3>
+        <div id="confusion-matrix"></div>
     </div>
     <div id="train-log" class="progress-block"></div>
 </div>
@@ -32,7 +32,8 @@
 </div>
 
 <style>
-.confusion-matrix {
+/* Общие стили для таблиц */
+.metrics-table, .confusion-matrix {
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
@@ -44,6 +45,8 @@
     font-size: 16px;
     font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
 }
+
+.metrics-table th, .metrics-table td,
 .confusion-matrix th, .confusion-matrix td {
     padding: 16px 20px;
     text-align: center;
@@ -51,39 +54,61 @@
     font-weight: 600;
     transition: background 0.2s;
 }
-.confusion-matrix th {
+
+.metrics-table th, .confusion-matrix th {
     background: #23408e;
     color: #fff;
     font-weight: 600;
     cursor: pointer;
     user-select: none;
 }
-.confusion-matrix th:hover {
+
+.metrics-table th:hover, .confusion-matrix th:hover {
     background: #1a2a4f;
 }
-.confusion-matrix tr {
+
+.metrics-table tr, .confusion-matrix tr {
     transition: background 0.2s;
 }
-.confusion-matrix tr:hover {
+
+.metrics-table tr:hover, .confusion-matrix tr:hover {
     background: #f0f4fa;
 }
-.confusion-matrix td {
+
+.metrics-table td, .confusion-matrix td {
     border-bottom: 1px solid #e9ecef;
     background: #fff;
     color: #23408e;
     font-weight: 600;
     font-size: 18px;
 }
-.confusion-matrix tr:last-child td {
+
+.metrics-table tr:last-child td, .confusion-matrix tr:last-child td {
     border-bottom: none;
 }
+
+/* Специальные стили для матрицы ошибок */
 .confusion-matrix .tp, .confusion-matrix .tn {
     background: #e8f5e8 !important;
     color: #2e7d32 !important;
 }
+
 .confusion-matrix .fp, .confusion-matrix .fn {
     background: #fce4ec !important;
     color: #c2185b !important;
+}
+
+/* Стили для заголовков блоков */
+.progress-block h3 {
+    font-size: 1.4em;
+    font-weight: 600;
+    margin-bottom: 20px;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 2px solid #e9ecef;
+    padding-bottom: 12px;
 }
 </style>
 
@@ -114,7 +139,7 @@ function updateMetricsTable(data) {
         if (isNaN(num)) return val;
         return num.toFixed(3);
     }
-    let html = '<thead><tr>' +
+    let html = '<table class="metrics-table"><thead><tr>' +
         '<th>Эпоха</th>' +
         '<th>Train Loss</th>' +
         '<th>Val Loss</th>' +
@@ -134,7 +159,7 @@ function updateMetricsTable(data) {
             `<td>${fmt(data.metrics.val_precisions && data.metrics.val_precisions[i])}</td>` +
             '</tr>';
     }
-    html += '</tbody>';
+    html += '</tbody></table>';
     table.innerHTML = html;
 }
 

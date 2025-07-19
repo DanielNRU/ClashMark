@@ -3,6 +3,7 @@ import unicodedata
 import logging
 import hashlib
 import pickle
+from pathlib import Path
 
 def normalize_filename(name):
     name = name.strip().lower()
@@ -26,6 +27,47 @@ def get_relative_image_path(image_href):
     elif len(parts) == 1:
         return parts[0]
     return ''
+
+def get_absolute_image_path_optimized(image_href, session_dir):
+    """
+    Оптимизированная функция для получения абсолютного пути к изображению.
+    Формирует путь напрямую из session_dir и относительного пути из XML без перебора файлов.
+    """
+    if not image_href or not session_dir:
+        return None
+    
+    # Нормализуем путь
+    rel_path = image_href.replace('\\', '/').strip()
+    
+    # Ищем BSImages в пути
+    bsimages_idx = rel_path.find('/BSImages/')
+    if bsimages_idx == -1:
+        bsimages_idx = rel_path.find('BSImages/')
+    
+    if bsimages_idx != -1:
+        # Извлекаем часть пути начиная с BSImages
+        rel_path = rel_path[bsimages_idx:].lstrip('/')
+        abs_path = os.path.join(session_dir, rel_path)
+        
+        # Проверяем существование файла
+        if os.path.exists(abs_path):
+            return abs_path
+    
+    # Fallback: если не нашли BSImages или файл не существует, 
+    # извлекаем только имя файла и ищем по нему
+    filename = os.path.basename(rel_path)
+    if filename:
+        # Ищем в папке BSImages
+        bsimages_path = os.path.join(session_dir, 'BSImages', filename)
+        if os.path.exists(bsimages_path):
+            return bsimages_path
+        
+        # Ищем в корне session_dir
+        root_path = os.path.join(session_dir, filename)
+        if os.path.exists(root_path):
+            return root_path
+    
+    return None
 
 
 def find_image_by_name(image_href, session_dir):

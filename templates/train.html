@@ -18,10 +18,9 @@
                             📁 Выбрать XML файлы
                         </button>
                     </div>
-                    <div id="xmlFiles" class="selected-files" style="display: none;"></div>
+                    <div id="xmlFiles" class="selected-files" style="display: none;">Файл не выбран</div>
                 </div>
             </div>
-            
             <div class="form-group">
                 <label>ZIP архивы с изображениями:</label>
                 <div class="file-drop" id="zipDrop">
@@ -31,23 +30,34 @@
                             📦 Выбрать ZIP архивы
                         </button>
                     </div>
-                    <div id="zipFiles" class="selected-files" style="display: none;"></div>
+                    <div id="zipFiles" class="selected-files" style="display: none;">Файл не выбран</div>
                 </div>
             </div>
         </div>
-        
         <div class="form-row">
             <div class="form-group">
                 <label>Количество эпох:</label>
-                <input type="number" name="epochs" value="5" min="1" max="50">
+                <input type="number" name="epochs" id="epochs" class="settings-input" min="1" max="1000" value="{{ settings.epochs or 10 }}">
             </div>
-            
             <div class="form-group">
                 <label>Размер батча:</label>
-                <input type="number" name="batch_size" value="16" min="1" max="64">
+                <input type="number" name="batch_size" id="batch_size" class="settings-input" min="1" max="256" value="{{ settings.batch_size or 16 }}">
             </div>
         </div>
-        
+        <div class="form-row">
+            <div class="form-group" style="max-width:420px; margin:0 auto;">
+                <label for="model_type">Архитектура:</label>
+                <select name="model_type" id="model_type" class="settings-input" onchange="updateModelInfo()">
+                    <option value="mobilenet_v3_small" {% if settings.model_type == 'mobilenet_v3_small' %}selected{% endif %}>MobileNetV3 Small (Быстрая)</option>
+                    <option value="efficientnet_b0" {% if settings.model_type == 'efficientnet_b0' %}selected{% endif %}>EfficientNet-B0 (Сбалансированная)</option>
+                    <option value="resnet18" {% if settings.model_type == 'resnet18' %}selected{% endif %}>ResNet18 (Качественная)</option>
+                    <option value="mobilenet_v2" {% if settings.model_type == 'mobilenet_v2' %}selected{% endif %}>MobileNetV2 (Альтернативная)</option>
+                </select>
+            </div>
+        </div>
+        <div class="model-info-card" style="max-width:420px; margin:18px auto 0 auto;">
+            <div id="modelInfoText"></div>
+        </div>
         <div class="form-row">
             <button type="submit" class="main-btn accent" id="trainBtn">
                 🚀 Начать обучение
@@ -55,14 +65,12 @@
         </div>
         <div id="errorContainer" style="display: none;" class="error-block"></div>
     </form>
-    
     <!-- Индикатор загрузки -->
     <div id="loadingIndicator" style="display: none;" class="loading-container">
         <div class="loading-spinner"></div>
         <p>Выполняется анализ файлов для обучения...</p>
         <p>Это может занять несколько минут в зависимости от количества файлов.</p>
     </div>
-    
     <div id="results" style="display: none;">
         <h3>Результаты анализа:</h3>
         <div id="statsContainer"></div>
@@ -71,14 +79,11 @@
             <div id="trainProgress"></div>
         </div>
     </div>
-    
-    <!-- Блок предпросмотра статистики -->
     <div id="previewStats" style="margin: 24px 0; display: none;"></div>
-<div class="category-pairs-block" style="max-width:none;">
-    <input type="text" id="categoryPairsSearch" placeholder="Поиск по категориям..." class="form-control" style="margin-bottom:12px;max-width:320px;display:none;">
-    <div id="categoryPairsList"></div>
-</div>
-
+    <div class="category-pairs-block">
+        <input type="text" id="categoryPairsSearch" placeholder="Поиск по категориям..." class="form-control" style="margin-bottom:12px;max-width:320px;display:none;">
+        <div id="categoryPairsList"></div>
+    </div>
 </div>
 
 <!-- Модальное окно для информации -->
@@ -160,47 +165,6 @@
     font-weight: 700;
     color: #23408e;
 }
-
-#trainProgressContainer {
-    margin-top: 24px;
-}
-
-#trainProgressContainer h4 {
-    color: #23408e;
-    margin-bottom: 16px;
-    text-align: center;
-}
-
-.progress-info {
-    background: white;
-    padding: 16px;
-    border-radius: 8px;
-    border: 1px solid #e9ecef;
-    margin-bottom: 16px;
-}
-
-.progress-bar {
-    width: 100%;
-    height: 20px;
-    background: #e9ecef;
-    border-radius: 10px;
-    overflow: hidden;
-    margin: 12px 0;
-}
-
-.progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #23408e, #667eea);
-    transition: width 0.3s ease;
-}
-
-.progress-text {
-    display: flex;
-    justify-content: space-between;
-    font-size: 14px;
-    color: #666;
-    margin-top: 8px;
-}
 .form-row {
     display: flex;
     justify-content: center;
@@ -212,6 +176,13 @@
     max-width: 420px;
     width: 100%;
     margin: 0 12px;
+}
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: #555;
+    font-size: 14px;
 }
 .file-drop {
     width: 100%;
@@ -230,6 +201,13 @@ input[type="file"] {
     width: 100%;
     text-align: left;
     margin-top: 8px;
+}
+.file-btns {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 8px;
 }
 .category-pairs-table {
     width: 100%;
@@ -301,100 +279,79 @@ input[type="file"] {
 .xml-stats-table tr:last-child td {
     border-bottom: none;
 }
+.card {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 32px 32px;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 4px 32px #0001;
+}
+@media (max-width: 900px) {
+    .form-row { flex-direction: column; gap: 16px; }
+    .form-group { min-width: 0; max-width: 100%; }
+    .file-drop { max-width: 100%; }
+}
 </style>
-
+<script>
+function updateModelInfo() {
+    const selectedModelType = document.querySelector('select[name="model_type"]')?.value;
+    const modelInfo = {
+        'mobilenet_v3_small': {
+            'speed': 'Быстрая',
+            'accuracy': 'Хорошая',
+            'params': '~2.5M',
+            'description': 'Оптимален для скорости инференса. Рекомендуется для быстрого анализа больших объемов данных.'
+        },
+        'efficientnet_b0': {
+            'speed': 'Средняя',
+            'accuracy': 'Лучшая',
+            'params': '~5.3M',
+            'description': 'Хороший баланс скорости и качества. Рекомендуется для большинства случаев.'
+        },
+        'resnet18': {
+            'speed': 'Медленная',
+            'accuracy': 'Отличная',
+            'params': '~11.7M',
+            'description': 'Лучшее качество, но медленнее. Рекомендуется для критически важных задач.'
+        },
+        'mobilenet_v2': {
+            'speed': 'Быстрая',
+            'accuracy': 'Хорошая',
+            'params': '~3.5M',
+            'description': 'Альтернатива MobileNetV3. Стабильная и проверенная архитектура.'
+        }
+    };
+    const info = modelInfo[selectedModelType] || modelInfo['mobilenet_v3_small'];
+    const infoText = document.getElementById('modelInfoText');
+    if (infoText) {
+        infoText.innerHTML = `
+            <div><b>Скорость:</b> ${info.speed}</div>
+            <div><b>Точность:</b> ${info.accuracy}</div>
+            <div><b>Параметры:</b> ${info.params}</div>
+            <div><b>Описание:</b> ${info.description}</div>
+        `;
+    }
+}
+document.addEventListener('DOMContentLoaded', function() {
+    updateModelInfo();
+});
+</script>
 <script>
 function handleFileSelect(input, containerId) {
-    console.log('handleFileSelect вызвана для', containerId);
     const container = document.getElementById(containerId);
     const files = Array.from(input.files);
-    
     if (files.length > 0) {
         container.innerHTML = files.map(file => `<div>📄 ${file.name}</div>`).join('');
         container.style.display = 'block';
     } else {
+        container.innerHTML = 'Файл не выбран';
         container.style.display = 'none';
     }
-    updatePreviewStats();
+    if (typeof updatePreviewStats === 'function') updatePreviewStats();
 }
-
-async function updatePreviewStats() {
-    const xmlInput = document.getElementById('trainXmlInput');
-    const zipInput = document.getElementById('trainZipInput');
-    const previewStats = document.getElementById('previewStats');
-    previewStats.style.display = 'none';
-    previewStats.innerHTML = '';
-
-    if (!xmlInput.files.length) return;
-
-    const formData = new FormData();
-    for (const file of xmlInput.files) formData.append('xml_file', file);
-    for (const file of zipInput.files) formData.append('zip_file', file);
-
-    previewStats.innerHTML = '⏳ Анализ файлов...';
-    previewStats.style.display = 'block';
-
-    try {
-        const resp = await fetch('/api/train_preview', { method: 'POST', body: formData });
-        const data = await resp.json();
-        console.log('[train_preview] Ответ backend:', data);
-        if (data.error) {
-            previewStats.innerHTML = `<span style="color:#c62828;">${data.error}</span>`;
-            showCategoryPairsTable([]);
-        } else if (!data.stats) {
-            previewStats.innerHTML = `<span style="color:#c62828;">Ошибка: backend не вернул поле stats</span>`;
-            showCategoryPairsTable([]);
-        } else {
-            const stats = data.stats;
-            let html = `<div class="stats-grid">
-                <div class="stat-item"><div class="stat-label">XML файлов</div><div class="stat-value">${stats.xml_file_count}</div></div>
-                <div class="stat-item"><div class="stat-label">ZIP архивов</div><div class="stat-value">${stats.zip_file_count}</div></div>
-                <div class="stat-item"><div class="stat-label">Всего коллизий</div><div class="stat-value">${stats.total_collisions}</div></div>
-                <div class="stat-item"><div class="stat-label">Готово для обучения</div><div class="stat-value">${stats.trainable_collisions}</div></div>
-            </div>`;
-            if (stats.per_file && Array.isArray(stats.per_file) && stats.per_file.length > 0) {
-                html += `<div style='margin-top:16px;'>`;
-                html += `<table class="xml-stats-table" style="width:100%;margin-bottom:16px;">
-                    <thead>
-                        <tr>
-                            <th>XML файл</th>
-                            <th>Коллизий всего</th>
-                            <th>Active</th>
-                            <th>Approve</th>
-                            <th>Reviewed</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-                stats.per_file.forEach(fileStat => {
-                    html += `<tr>
-                        <td>${fileStat.file}</td>
-                        <td><b>${fileStat.total_collisions}</b></td>
-                        <td>${fileStat.active_count}</td>
-                        <td>${fileStat.approve_count}</td>
-                        <td>${fileStat.reviewed_count}</td>
-                    </tr>`;
-                });
-                html += `</tbody></table></div>`;
-            }
-            previewStats.innerHTML = html;
-            previewStats.style.display = 'block';
-            showCategoryPairsTable(stats.category_pairs || []);
-        }
-    } catch (e) {
-        previewStats.innerHTML = `<span style="color:#c62828;">Ошибка предпросмотра: ${e.message}</span>`;
-        showCategoryPairsTable([]);
-    }
-}
-
-function showInfo() {
-    document.getElementById('infoText').innerText = 'Загрузите XML файлы с коллизиями и ZIP архивы с изображениями для обучения модели. Система автоматически найдет соответствующие изображения и создаст обучающую выборку из visual-пар.';
-    document.getElementById('infoModal').style.display = 'block';
-}
-
-function closeInfo() {
-    document.getElementById('infoModal').style.display = 'none';
-}
-
+</script>
+<script>
 // Drag & Drop функциональность
 function setupDragDrop(dropZoneId, inputName) {
     const dropZone = document.getElementById(dropZoneId);
@@ -426,86 +383,15 @@ function setupDragDrop(dropZoneId, inputName) {
     });
 }
 
-// Инициализация drag & drop
 document.addEventListener('DOMContentLoaded', function() {
     setupDragDrop('xmlDrop', 'xml_file');
-    setupDragDrop('zipDrop', 'zip_file');
-    // Явно назначаем обработчики onchange для input[type=file] — вызываем updatePreviewStats из train.html
-    document.getElementById('trainXmlInput').onchange = function() { handleFileSelect(this, 'xmlFiles'); };
-    document.getElementById('trainZipInput').onchange = function() { handleFileSelect(this, 'zipFiles'); };
+    setupDragDrop('zipDrop', 'images_zip');
+    updateModelInfo();
     // Закрытие модального окна
-    const infoModalClose = document.querySelector('.info-modal-close');
-    if (infoModalClose) infoModalClose.onclick = closeInfo;
-    const infoModal = document.getElementById('infoModal');
-    if (infoModal) {
-        infoModal.onclick = function(e) { if (e.target === this) closeInfo(); };
-    }
-});
-
-// Модифицируем updatePreviewStats для скрытия поиска до появления таблицы
-function showCategoryPairsTable(pairs) {
-    const searchInput = document.getElementById('categoryPairsSearch');
-    window.categoryPairsSortCol = 2;
-    window.categoryPairsSortDir = 'desc';
-    window.categoryPairsData = pairs;
-    if (pairs && pairs.length) {
-        if (searchInput) searchInput.style.display = '';
-        renderCategoryPairsTable(pairs, window.categoryPairsSortCol, window.categoryPairsSortDir);
-    } else {
-        if (searchInput) searchInput.style.display = 'none';
-        document.getElementById('categoryPairsList').innerHTML = '';
-    }
-}
-// Безопасно добавляем обработчик input для поиска по категориям
-const trainSearchInput = document.getElementById('categoryPairsSearch');
-if (trainSearchInput) {
-    trainSearchInput.addEventListener('input', function() {
-        showCategoryPairsTable(window.categoryPairsData);
-    });
-}
-// Безопасно добавляем обработчик закрытия модального окна
-const infoModalClose = document.querySelector('.info-modal-close');
-if (infoModalClose) {
-    infoModalClose.onclick = closeInfo;
-}
-const infoModal = document.getElementById('infoModal');
-if (infoModal) {
-    infoModal.onclick = function(e) { 
+    document.querySelector('.info-modal-close').onclick = closeInfo;
+    document.getElementById('infoModal').onclick = function(e) { 
         if (e.target === this) closeInfo(); 
     };
-}
-</script>
-<script>
-// Обработка сабмита формы обучения (AJAX)
-const trainForm = document.getElementById('trainForm');
-if (trainForm) {
-    trainForm.addEventListener('submit', async function(e) {
-        e.preventDefault();
-        document.getElementById('errorContainer').style.display = 'none';
-        document.getElementById('loadingIndicator').style.display = 'block';
-        // Собираем данные формы
-        const formData = new FormData(trainForm);
-        // Добавляем выбранные файлы вручную
-        const xmlInput = document.getElementById('trainXmlInput');
-        const zipInput = document.getElementById('trainZipInput');
-        for (const file of xmlInput.files) formData.append('xml_file', file);
-        for (const file of zipInput.files) formData.append('zip_file', file);
-        try {
-            const resp = await fetch('/api/train', { method: 'POST', body: formData });
-            const data = await resp.json();
-            if (data.success) {
-                window.location.href = '/train_progress';
-            } else {
-                document.getElementById('loadingIndicator').style.display = 'none';
-                document.getElementById('errorContainer').style.display = 'block';
-                document.getElementById('errorContainer').innerText = data.error || 'Ошибка запуска обучения';
-            }
-        } catch (err) {
-            document.getElementById('loadingIndicator').style.display = 'none';
-            document.getElementById('errorContainer').style.display = 'block';
-            document.getElementById('errorContainer').innerText = 'Ошибка отправки формы: ' + err.message;
-        }
-    });
-}
+});
 </script>
 {% endblock %} 

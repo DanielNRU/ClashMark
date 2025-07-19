@@ -241,7 +241,8 @@ def handle_train_request():
                     'category_pairs': pairs_with_counts,
                     'logs': load_train_progress(temp_dir).get('log', ''),
                     'epochs': epochs,
-                    'batch_size': batch_size
+                    'batch_size': batch_size,
+                    'model_type': request.form.get('model_type', 'mobilenet_v3_small')
                 }
                 
                 # Сохраняем в _stats.json
@@ -249,26 +250,6 @@ def handle_train_request():
                 os.makedirs('model', exist_ok=True)
                 with open(stats_path, 'w', encoding='utf-8') as f:
                     json.dump(stats_data, f, ensure_ascii=False, indent=2, default=str)
-                
-                # Обновляем финальные метрики
-                update_train_progress({
-                    'status': 'done',
-                    'metrics': {
-                        'final_accuracy': metrics.get('final_accuracy', 0),
-                        'final_f1': metrics.get('final_f1', 0),
-                        'final_recall': metrics.get('final_recall', 0),
-                        'final_precision': metrics.get('final_precision', 0),
-                        'confusion_matrix': metrics.get('confusion_matrix', []),
-                        'val_precisions': metrics.get('val_precisions', []),
-                        'val_f1s': metrics.get('val_f1s', []),
-                        'val_recalls': metrics.get('val_recalls', []),
-                        'val_accuracies': metrics.get('val_accuracies', []),
-                        'train_losses': metrics.get('train_losses', []),
-                        'val_losses': metrics.get('val_losses', [])
-                    },
-                    'epochs': epochs,
-                    'batch_size': batch_size
-                }, temp_dir)
                 
                 # --- Запись в model_train_log.json ---
                 log_path = os.path.join('model', 'model_train_log.json')
@@ -281,7 +262,8 @@ def handle_train_request():
                     "final_precision": stats_data['metrics'].get('final_precision'),
                     "confusion_matrix": stats_data['metrics'].get('confusion_matrix'),
                     "epochs": stats_data['epochs'],
-                    "batch_size": stats_data['batch_size']
+                    "batch_size": stats_data['batch_size'],
+                    "model_type": stats_data['model_type']
                 }
                 if os.path.exists(log_path):
                     with open(log_path, 'r', encoding='utf-8') as f:

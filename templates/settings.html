@@ -279,10 +279,20 @@
                 </div>
             </div>
             
-            <div class="form-group">
-                <label style="display: flex; align-items: center; cursor: pointer;">
+            <!-- Удалён блок выбора архитектуры и информации о модели -->
+            
+            <div class="form-row" style="gap:32px;">
+                <!-- Был select архитектуры, теперь его нет -->
+            </div>
+            
+            <div class="form-group" style="display: flex; gap: 32px; align-items: center;">
+                <label style="display: flex; align-items: center; cursor: pointer; margin-bottom: 0;">
                     <input type="checkbox" name="manual_review_enabled" {% if settings.manual_review_enabled %}checked{% endif %}>
                     Включить ручную разметку
+                </label>
+                <label style="display: flex; align-items: center; cursor: pointer; margin-bottom: 0;">
+                    <input type="checkbox" name="use_optimization" {% if settings.use_optimization %}checked{% endif %}>
+                    Включить оптимизацию инференса
                 </label>
             </div>
         </div>
@@ -440,6 +450,49 @@ function renderConfusionMatrixSettings(matrix) {
     return html;
 }
 
+function updateModelInfo() {
+    const selectedModelType = document.querySelector('select[name="model_type"]').value;
+    const modelInfo = {
+        'mobilenet_v3_small': {
+            'speed': 'Быстрая',
+            'accuracy': 'Хорошая',
+            'params': '~2.5M',
+            'description': 'Оптимален для скорости инференса. Рекомендуется для быстрого анализа больших объемов данных.'
+        },
+        'efficientnet_b0': {
+            'speed': 'Средняя',
+            'accuracy': 'Лучшая',
+            'params': '~5.3M',
+            'description': 'Хороший баланс скорости и качества. Рекомендуется для большинства случаев.'
+        },
+        'resnet18': {
+            'speed': 'Медленная',
+            'accuracy': 'Отличная',
+            'params': '~11.7M',
+            'description': 'Лучшее качество, но медленнее. Рекомендуется для критически важных задач.'
+        },
+        'mobilenet_v2': {
+            'speed': 'Быстрая',
+            'accuracy': 'Хорошая',
+            'params': '~3.5M',
+            'description': 'Альтернатива MobileNetV3. Стабильная и проверенная архитектура.'
+        }
+    };
+    
+    const info = modelInfo[selectedModelType] || modelInfo['mobilenet_v3_small'];
+    const infoDiv = document.getElementById('modelInfo');
+    const infoText = document.getElementById('modelInfoText');
+    
+    infoText.innerHTML = `
+        <div style="margin-bottom: 8px;"><strong>Скорость:</strong> ${info.speed}</div>
+        <div style="margin-bottom: 8px;"><strong>Точность:</strong> ${info.accuracy}</div>
+        <div style="margin-bottom: 8px;"><strong>Параметры:</strong> ${info.params}</div>
+        <div><strong>Описание:</strong> ${info.description}</div>
+    `;
+    
+    infoDiv.style.display = 'block';
+}
+
 function updateModelStats() {
     const selectedModel = document.getElementById('modelSelect').value;
     const statsSection = document.getElementById('modelStatsSection');
@@ -514,6 +567,7 @@ function closeInfo() {
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', function() {
     updateModelStats();
+    updateModelInfo();
     document.querySelector('.info-modal-close').onclick = closeInfo;
     document.getElementById('infoModal').onclick = function(e) { 
         if (e.target === this) closeInfo(); 
@@ -522,6 +576,25 @@ document.addEventListener('DOMContentLoaded', function() {
     if (searchInput) {
         searchInput.addEventListener('input', function() {
             showCategoryPairsTable(window.categoryPairsData);
+        });
+    }
+});
+
+// === Автоматическое обновление архитектуры при выборе файла модели ===
+document.addEventListener('DOMContentLoaded', function() {
+    const modelFileSelect = document.querySelector('select[name="model_file"]');
+    const modelTypeSelect = document.querySelector('select[name="model_type"]');
+    if (modelFileSelect && modelTypeSelect) {
+        modelFileSelect.addEventListener('change', function() {
+            const selectedModel = this.value;
+            fetch(`/api/model_info?model_file=${encodeURIComponent(selectedModel)}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.model_type) {
+                        modelTypeSelect.value = data.model_type;
+                        updateModelInfo();
+                    }
+                });
         });
     }
 });

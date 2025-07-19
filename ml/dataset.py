@@ -5,7 +5,7 @@ from PIL import Image
 import os
 from torchvision import transforms
 import logging
-from core.image_utils import find_image_by_name, get_relative_image_path
+from core.image_utils import find_image_by_name, get_relative_image_path, get_absolute_image_path_optimized
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +17,14 @@ class CollisionImageDataset(Dataset):
         # Проверяем наличие необходимых колонок
         if 'image_href' in self.dataframe.columns and session_dir:
             def robust_find(href):
-                path = find_image_by_name(href, session_dir) if href else None
+                # Используем оптимизированную функцию поиска
+                path = get_absolute_image_path_optimized(href, session_dir) if href else None
                 if not path:
-                    rel_path = get_relative_image_path(href) if href else ''
-                    logging.warning(f"[CollisionImageDataset] Не найдено изображение для href: {href} | session_dir: {session_dir} | rel_path: {rel_path}")
+                    # Fallback к старому методу
+                    path = find_image_by_name(href, session_dir) if href else None
+                    if not path:
+                        rel_path = get_relative_image_path(href) if href else ''
+                        logging.warning(f"[CollisionImageDataset] Не найдено изображение для href: {href} | session_dir: {session_dir} | rel_path: {rel_path}")
                 return path
             self.dataframe['image_file'] = self.dataframe['image_href'].apply(robust_find)
         if 'image_file' not in self.dataframe.columns:

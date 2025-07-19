@@ -8,7 +8,7 @@ import os
 from ml.model import create_model
 from ml.dataset import CollisionImageDataset, create_transforms
 from core.xml_utils import parse_xml_data, load_all_category_pairs, get_pair, export_to_xml, export_to_bimstep_xml
-from core.image_utils import find_image_by_name
+from core.image_utils import find_image_by_name, get_absolute_image_path_optimized
 
 def fill_xml_fields(df):
     df_result = df.copy()
@@ -77,7 +77,13 @@ def collect_dataset_from_multiple_files(xml_paths, session_dir=None, export_form
         if not session_dir:
             continue
         def robust_find(href):
-            path = find_image_by_name(href, session_dir) if href else None
+            if not href:
+                return None
+            # Используем оптимизированную функцию поиска
+            path = get_absolute_image_path_optimized(href, session_dir)
+            if not path:
+                # Fallback к старому методу
+                path = find_image_by_name(href, session_dir)
             return path
         df['image_file'] = df['image_href'].apply(robust_find)
         df['source_file'] = os.path.basename(xml_path)

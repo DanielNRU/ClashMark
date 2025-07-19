@@ -8,7 +8,7 @@ from ml.inference import collect_dataset_from_multiple_files, predict
 from ml.model import create_model
 from ml.dataset import create_transforms
 from core.xml_utils import export_to_xml, export_to_bimstep_xml
-from core.image_utils import find_image_by_name
+from core.image_utils import find_image_by_name, get_absolute_image_path_optimized
 
 def handle_inference_request():
     if request.method == 'POST':
