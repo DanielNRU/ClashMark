@@ -229,6 +229,20 @@ def settings():
     
     # Загружаем метрики для каждой модели
     model_metrics = {}
+    # Загрузим карту model_file -> model_type из model_train_log.json
+    model_types = {}
+    log_path = os.path.join('model', 'model_train_log.json')
+    if os.path.exists(log_path):
+        try:
+            with open(log_path, 'r', encoding='utf-8') as f:
+                logs = json.load(f)
+            if isinstance(logs, dict):
+                logs = [logs]
+            for entry in logs:
+                if 'model_file' in entry and 'model_type' in entry:
+                    model_types[entry['model_file']] = entry['model_type']
+        except Exception as e:
+            logger.error(f"Ошибка чтения model_train_log.json: {e}")
     for model_file in model_files:
         stats_file = os.path.join('model', f'{model_file}_stats.json')
         if os.path.exists(stats_file):
@@ -239,6 +253,8 @@ def settings():
                     if 'metrics' in stats and isinstance(stats['metrics'], dict):
                         for k, v in stats['metrics'].items():
                             stats[k] = v
+                    # Добавляем архитектуру из train_log, если есть
+                    stats['model_type'] = model_types.get(model_file, stats.get('model_type', '—'))
                     model_metrics[model_file] = stats
             except Exception as e:
                 logger.error(f"Ошибка загрузки статистики для {model_file}: {e}")
@@ -1547,7 +1563,8 @@ def api_train():
                     "final_precision": stats['metrics'].get('final_precision'),
                     "confusion_matrix": stats['metrics'].get('confusion_matrix'),
                     "epochs": stats['epochs'],
-                    "batch_size": stats['batch_size']
+                    "batch_size": stats['batch_size'],
+                    "model_type": model_type
                 }
                 if os.path.exists(log_path):
                     with open(log_path, 'r', encoding='utf-8') as f:

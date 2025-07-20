@@ -239,7 +239,8 @@
                             <option value="{{ file }}" {% if settings.model_file == file %}selected{% endif %}>
                                 {{ file }}
                                 {% if model_metrics[file] %}
-                                    (E: {{ model_metrics[file].epochs|default('—') }}, 
+                                    ({{ model_metrics[file].model_type|default('—') }},
+                                     E: {{ model_metrics[file].epochs|default('—') }}, 
                                      B: {{ model_metrics[file].batch_size|default('—') }}, 
                                      Acc: {{ model_metrics[file].final_accuracy|round(3)|default('—') }}, 
                                      Prec: {{ model_metrics[file].final_precision|round(3)|default('—') }}, 

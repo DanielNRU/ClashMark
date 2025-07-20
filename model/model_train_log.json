@@ -38,5 +38,45 @@
     ],
     "epochs": 10,
     "batch_size": 16
+  },
+  {
+    "train_time": "2025-07-20T14:10:05.908874",
+    "model_file": "model_20250720_140632.pt",
+    "final_accuracy": 0.9921259842519685,
+    "final_f1": 0.9921259842519685,
+    "final_recall": 1.0,
+    "final_precision": 0.984375,
+    "confusion_matrix": [
+      [
+        63,
+        1
+      ],
+      [
+        0,
+        63
+      ]
+    ],
+    "epochs": 10,
+    "batch_size": 16
+  },
+  {
+    "train_time": "2025-07-20T14:20:22.280232",
+    "model_file": "model_20250720_141836.pt",
+    "final_accuracy": 0.889763779527559,
+    "final_f1": 0.875,
+    "final_recall": 0.7777777777777778,
+    "final_precision": 1.0,
+    "confusion_matrix": [
+      [
+        64,
+        0
+      ],
+      [
+        14,
+        49
+      ]
+    ],
+    "epochs": 5,
+    "batch_size": 16
   }
 ]
