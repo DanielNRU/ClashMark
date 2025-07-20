@@ -504,12 +504,8 @@ def analyze_files():
                     export_to_xml(df_file, output_xml, xml_path)
                 
                 # Создаем ссылки для скачивания
-                if export_format == 'bimstep':
-                    # Для BIMStep формата используем исходное имя файла
-                    download_filename = f"{orig_base_name}.xml"
-                else:
-                    # Для стандартного формата используем полное имя файла
-                    download_filename = os.path.basename(output_xml)
+                # Для всех форматов используем исходное имя файла
+                download_filename = f"{orig_base_name}.xml"
                 
                 download_url = url_for('download_file', session_id=session_id, filename=os.path.basename(output_xml))
                 download_links.append({'name': download_filename, 'url': download_url})
@@ -966,12 +962,8 @@ def api_manual_review():
                     export_to_xml(df_file, output_xml, orig_xml)
                 
                 # Создаем ссылки для скачивания
-                if export_format == 'bimstep':
-                    # Для BIMStep формата используем исходное имя файла
-                    download_filename = f"{orig_base_name}.xml"
-                else:
-                    # Для стандартного формата используем полное имя файла
-                    download_filename = os.path.basename(output_xml)
+                # Для всех форматов используем исходное имя файла
+                download_filename = f"{orig_base_name}.xml"
                 
                 download_url = url_for('download_file', session_id=session_id, filename=os.path.basename(output_xml))
                 download_links.append({'name': download_filename, 'url': download_url})
