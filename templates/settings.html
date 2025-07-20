@@ -87,8 +87,8 @@
     box-sizing: border-box;
 }
 #modelSelect.settings-input {
-    min-width: 640px;
-    max-width: 1040px;
+    min-width: 800px;
+    max-width: 1400px;
 }
 .form-group input.settings-input,
 .form-group select.settings-input {
@@ -234,7 +234,7 @@
             <div class="form-row" style="gap:32px;">
                 <div class="form-group">
                     <label>Файл модели:</label>
-                    <select name="model_file" id="modelSelect" onchange="updateModelStats()" class="settings-input">
+                    <select name="model_file" id="modelSelect" onchange="updateModelStats()" class="settings-input" style="min-width:800px;max-width:1600px;">
                         {% for file in model_files %}
                             <option value="{{ file }}" {% if settings.model_file == file %}selected{% endif %}>
                                 {{ file }}

@@ -11,6 +11,7 @@ from datetime import datetime
 import uuid
 import threading
 import urllib.parse
+import glob
 
 from core.xml_utils import (
     load_all_category_pairs, get_pair, parse_xml_data, export_to_bimstep_xml, export_to_xml, add_bimstep_journal_entry
@@ -201,6 +202,16 @@ def settings():
                         os.remove(model_path)
                     if os.path.exists(stats_path):
                         os.remove(stats_path)
+                    # Удаляем записи из model_train_log.json
+                    log_path = os.path.join('model', 'model_train_log.json')
+                    if os.path.exists(log_path):
+                        with open(log_path, 'r', encoding='utf-8') as f:
+                            logs = json.load(f)
+                        if isinstance(logs, dict):
+                            logs = [logs]
+                        logs = [entry for entry in logs if entry.get('model_file') != model_file]
+                        with open(log_path, 'w', encoding='utf-8') as f:
+                            json.dump(logs, f, ensure_ascii=False, indent=2)
                     flash(f'Модель {model_file} удалена!', 'success')
                 except Exception as e:
                     flash(f'Ошибка удаления модели: {e}', 'error')
@@ -208,14 +219,24 @@ def settings():
                 flash('Нельзя удалить основную модель!', 'error')
                 
         elif action == 'clear_cache':
-            try:
-                # Удаляем только файлы статистики, не модели
-                for file in os.listdir('model'):
-                    if file.endswith('_stats.json'):
-                        os.remove(os.path.join('model', file))
-                flash('Кэш очищен!', 'success')
-            except Exception as e:
-                flash(f'Ошибка очистки кэша: {e}', 'error')
+            import tempfile
+            import glob
+            removed = 0
+            errors = []
+            # Удаляем только из системного tmp
+            tmp_dir = tempfile.gettempdir()
+            for pattern in ['analysis_session_*', 'train_session_*']:
+                for folder in glob.glob(os.path.join(tmp_dir, pattern)):
+                    try:
+                        if os.path.isdir(folder):
+                            shutil.rmtree(folder)
+                            removed += 1
+                    except Exception as e:
+                        errors.append(f"{folder}: {e}")
+            if errors:
+                flash(f'Удалено {removed} папок, ошибки: {errors}', 'error')
+            else:
+                flash(f'Удалено {removed} временных папок!', 'success')
     
     # Загружаем настройки
     settings = load_settings()
@@ -1533,7 +1554,7 @@ def api_train():
                     update_train_progress({'status': 'error', 'log': 'Не найдено данных для обучения (требуются классы 0 и 1)'}, session_dir)
                     return
                 
-                model_type = settings.get('model_type', 'mobilenet_v3_small')
+                model_type = request.form.get('model_type', 'mobilenet_v3_small')
                 pretty_model_type = prettify_model_type(model_type)
                 metrics = train_model(df_visual_filtered, epochs=epochs, batch_size=batch_size, progress_callback=progress_callback, model_filename=model_name, model_type=model_type)
                 if metrics is None:
@@ -1647,10 +1668,10 @@ def api_model_info():
 
 def prettify_model_type(model_type):
     mapping = {
-        'mobilenet_v3_small': 'mobilenet v3 small',
-        'efficientnet_b0': 'efficientnet b0',
-        'resnet18': 'resnet 18',
-        'mobilenet_v2': 'mobilenet v2',
+        'mobilenet_v3_small': 'MobileNetV3 Small',
+        'efficientnet_b0': 'EfficientNet-B0',
+        'resnet18': 'ResNet 18',
+        'mobilenet_v2': 'MobileNetV2',
     }
     return mapping.get(model_type, model_type.replace('_', ' '))
 

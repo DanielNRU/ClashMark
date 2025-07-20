@@ -17,54 +17,15 @@
       ]
     ],
     "epochs": 5,
-    "batch_size": 16
+    "batch_size": 16,
+    "model_type": "MobileNetV3 Small"
   },
   {
-    "train_time": "2025-07-19T21:29:03.372475",
-    "model_file": "model_20250719_212541.pt",
-    "final_accuracy": 0.9743589743589743,
-    "final_f1": 0.9747899159663865,
-    "final_recall": 1.0,
-    "final_precision": 0.9508196721311475,
-    "confusion_matrix": [
-      [
-        56,
-        3
-      ],
-      [
-        0,
-        58
-      ]
-    ],
-    "epochs": 10,
-    "batch_size": 16
-  },
-  {
-    "train_time": "2025-07-20T14:10:05.908874",
-    "model_file": "model_20250720_140632.pt",
-    "final_accuracy": 0.9921259842519685,
-    "final_f1": 0.9921259842519685,
-    "final_recall": 1.0,
-    "final_precision": 0.984375,
-    "confusion_matrix": [
-      [
-        63,
-        1
-      ],
-      [
-        0,
-        63
-      ]
-    ],
-    "epochs": 10,
-    "batch_size": 16
-  },
-  {
-    "train_time": "2025-07-20T14:20:22.280232",
-    "model_file": "model_20250720_141836.pt",
-    "final_accuracy": 0.889763779527559,
-    "final_f1": 0.875,
-    "final_recall": 0.7777777777777778,
+    "train_time": "2025-07-20T14:50:39.748355",
+    "model_file": "model_20250720_144828.pt",
+    "final_accuracy": 0.9448818897637795,
+    "final_f1": 0.9411764705882353,
+    "final_recall": 0.8888888888888888,
     "final_precision": 1.0,
     "confusion_matrix": [
       [
@@ -72,32 +33,12 @@
         0
       ],
       [
-        14,
-        49
+        7,
+        56
       ]
     ],
     "epochs": 5,
-    "batch_size": 16
-  },
-  {
-    "train_time": "2025-07-20T14:27:13.799119",
-    "model_file": "model_20250720_142343.pt",
-    "final_accuracy": 0.984251968503937,
-    "final_f1": 0.9841269841269841,
-    "final_recall": 0.9841269841269841,
-    "final_precision": 0.9841269841269841,
-    "confusion_matrix": [
-      [
-        63,
-        1
-      ],
-      [
-        1,
-        62
-      ]
-    ],
-    "epochs": 10,
     "batch_size": 16,
-    "model_type": "mobilenet v3 small"
+    "model_type": "MobileNetV3 Small"
   }
 ]
