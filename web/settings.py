@@ -80,8 +80,7 @@ def handle_settings_request():
                 'inference_mode': request.form.get('inference_mode', 'model'),
                 'manual_review_enabled': 'manual_review_enabled' in request.form,
                 'export_format': request.form.get('export_format', 'standard'),
-                'model_type': request.form.get('model_type', 'mobilenet_v3_small'),
-                'use_optimization': 'use_optimization' in request.form
+                'model_type': request.form.get('model_type', 'mobilenet_v3_small')
             }
             save_settings(settings)
             message = 'Настройки сохранены!'
@@ -114,8 +113,7 @@ def load_settings():
             'inference_mode': 'model',
             'manual_review_enabled': True,
             'export_format': 'standard',
-            'model_type': 'mobilenet_v3_small',
-            'use_optimization': True
+            'model_type': 'mobilenet_v3_small'
         }
 
 @staticmethod

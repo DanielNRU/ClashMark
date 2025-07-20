@@ -188,7 +188,6 @@ def settings():
             settings['manual_review_enabled'] = 'manual_review_enabled' in request.form
             # Добавляем новые настройки
             settings['model_type'] = request.form.get('model_type', 'mobilenet_v3_small')
-            settings['use_optimization'] = 'use_optimization' in request.form
             save_settings(settings)
             flash('Настройки сохранены!', 'success')
             
@@ -274,8 +273,7 @@ def analyze_files():
             'manual_review_enabled': manual_review_enabled,
             'export_format': export_format,
             'model_file': settings.get('model_file', 'model_clashmark.pt'),
-            'model_type': settings.get('model_type', 'mobilenet_v3_small'),
-            'use_optimization': settings.get('use_optimization', True)
+            'model_type': settings.get('model_type', 'mobilenet_v3_small')
         }
         if not xml_files:
             return jsonify({'error': 'Не выбраны XML файлы!', 'analysis_settings': analysis_settings})
@@ -384,8 +382,7 @@ def analyze_files():
                                 return entry.get('model_type', 'mobilenet_v3_small')
                     return 'mobilenet_v3_small'
                 model_type = get_model_type_for_file(settings.get('model_file', 'model_clashmark.pt'))
-                use_optimization = settings.get('use_optimization', True)
-                model = get_cached_model(device, model_path, model_type, use_optimization)
+                model = get_cached_model(device, model_path, model_type, True)
                 model.to(device)
                 model.eval()
                 visual_pred_df = predict(model, device, visual_df, transform, 
