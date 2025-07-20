@@ -10,6 +10,7 @@ import pandas as pd
 from datetime import datetime
 import uuid
 import threading
+import urllib.parse
 
 from core.xml_utils import (
     load_all_category_pairs, get_pair, parse_xml_data, export_to_bimstep_xml, export_to_xml, add_bimstep_journal_entry
@@ -50,8 +51,23 @@ def apply_manual_review(df, session_dir):
         return df
     try:
         import json
-        with open(review_path, 'r', encoding='utf-8') as f:
-            reviews = json.load(f)
+        # Пробуем разные способы чтения файла
+        reviews = None
+        try:
+            with open(review_path, 'r', encoding='utf-8') as f:
+                reviews = json.load(f)
+        except UnicodeDecodeError:
+            # Пробуем с другой кодировкой
+            with open(review_path, 'r', encoding='latin-1') as f:
+                reviews = json.load(f)
+        except Exception as e:
+            logger.error(f"[apply_manual_review] Ошибка чтения файла: {e}")
+            return df
+        
+        if not reviews:
+            logger.warning(f"[apply_manual_review] Файл пустой или не содержит данных")
+            return df
+            
         logger.info(f"[apply_manual_review] Прочитано {len(reviews)} разметок из {review_path}")
         review_map = {r['clash_uid']: r['status'] for r in reviews}
         df_updated = df.copy()
@@ -95,9 +111,7 @@ def apply_manual_review(df, session_dir):
         logger.info(f"Статистика ручной разметки после применения: Approved={manual_approved}, Active={manual_active}, Reviewed={manual_reviewed}")
         return df_updated
     except Exception as e:
-        logger.error(f"Ошибка применения ручной разметки: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"[apply_manual_review] Ошибка применения ручной разметки: {e}")
         return df
 
 def allowed_file(filename):
@@ -604,8 +618,8 @@ def analyze_files():
         stage_statuses = []
         # Этап 1: алгоритм всегда есть
         stage_statuses.append({'key': 'algorithm', 'status': 'done'})
-        # Этап 2: модель
-        if inference_mode in ('model', 'hybrid'):
+        # Этап 2: модель (только оптимизированный инференс)
+        if inference_mode == 'model':
             stage_statuses.append({'key': 'model', 'status': 'done'})
         # Этап 3: ручная разметка
         if manual_review_enabled:
@@ -627,7 +641,20 @@ def analyze_files():
         logger.info(f"Итоговая статистика в ответе: {stats_total}")
         # --- В analyze_files (после формирования df_with_manual и перед return) ---
         csv_path = os.path.join(session_dir, 'df_with_inference.csv')
-        df_with_manual.to_csv(csv_path, index=False)
+        try:
+            df_with_manual.to_csv(csv_path, index=False, encoding='utf-8')
+        except Exception as e:
+            logger.warning(f"[analyze_files] Ошибка сохранения CSV: {e}")
+            try:
+                # Альтернативный способ сохранения
+                temp_csv_path = os.path.join(session_dir, 'df_with_inference_temp.csv')
+                df_with_manual.to_csv(temp_csv_path, index=False, encoding='utf-8')
+                if os.path.exists(csv_path):
+                    os.remove(csv_path)
+                os.rename(temp_csv_path, csv_path)
+            except Exception as e2:
+                logger.error(f"[analyze_files] Не удалось сохранить CSV: {e2}")
+        
         return jsonify(to_py(response_data))
         
     except Exception as e:
@@ -825,90 +852,150 @@ def api_manual_review():
         review_path = os.path.join(session_dir, 'manual_review.json')
         import json
         try:
+            # Сначала пробуем стандартный способ
             with open(review_path, 'w', encoding='utf-8') as f:
                 json.dump(reviews, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.error(f"[manual_review] Ошибка записи manual_review.json: {e}")
-            return jsonify({'error': f'Ошибка записи manual_review.json: {e}'}), 500
+            logger.warning(f"[manual_review] Первая попытка записи не удалась: {e}")
+            try:
+                # Альтернативный способ для Windows
+                import tempfile
+                temp_path = os.path.join(session_dir, 'manual_review_temp.json')
+                with open(temp_path, 'w', encoding='utf-8') as f:
+                    json.dump(reviews, f, ensure_ascii=False, indent=2)
+                # Переименовываем файл
+                if os.path.exists(review_path):
+                    os.remove(review_path)
+                os.rename(temp_path, review_path)
+            except Exception as e2:
+                logger.error(f"[manual_review] Вторая попытка записи не удалась: {e2}")
+                try:
+                    # Последняя попытка - запись без форматирования
+                    with open(review_path, 'w', encoding='utf-8') as f:
+                        json.dump(reviews, f, ensure_ascii=False)
+                except Exception as e3:
+                    logger.error(f"[manual_review] Все попытки записи не удались: {e3}")
+                    return jsonify({'error': f'Ошибка записи manual_review.json: {e3}'}), 500
+        
+        # Проверяем, что файл действительно создался
+        if not os.path.exists(review_path):
+            logger.error(f"[manual_review] Файл не создался после записи: {review_path}")
+            return jsonify({'error': 'Файл ручной разметки не был создан'}), 500
+        
+        # Проверяем содержимое файла
+        try:
+            with open(review_path, 'r', encoding='utf-8') as f:
+                saved_reviews = json.load(f)
+            if len(saved_reviews) != len(reviews):
+                logger.warning(f"[manual_review] Количество сохраненных разметок ({len(saved_reviews)}) не совпадает с отправленными ({len(reviews)})")
+        except Exception as e:
+            logger.error(f"[manual_review] Ошибка проверки сохраненного файла: {e}")
+        
         logger.info(f"Ручная разметка сохранена в {review_path}")
         logger.info(f"Статистика сохраненной разметки: {status_counts}")
         # --- Новый блок: применяем ручную разметку, пересчитываем статистику и переэкспортируем XML ---
         import pandas as pd
         df_path = os.path.join(session_dir, 'df_with_inference.csv')
         if os.path.exists(df_path):
-            df_combined = pd.read_csv(df_path)
-            df_with_manual = apply_manual_review(df_combined, session_dir)
-            # value_counts по статусу
-            status_counts = df_with_manual['cv_status'].value_counts().to_dict()
-            # Переэкспорт XML
-            orig_xmls = []
-            for f in os.listdir(session_dir):
-                if f.endswith('.xml') and not f.startswith(('cv_results_', 'bimstep_results_', 'JournalBimStep')):
-                    orig_xmls.append(os.path.join(session_dir, f))
-            settings = load_settings()
-            export_format = settings.get('export_format', 'standard')
-            download_links = []
-            for orig_xml in orig_xmls:
-                orig_filename = os.path.basename(orig_xml)
-                orig_base_name = os.path.splitext(orig_filename)[0]
-                df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
-                if not df_file.empty:
-                    if export_format == 'bimstep':
-                        output_xml = os.path.join(session_dir, f"bimstep_results_{orig_base_name}.xml")
-                        export_to_bimstep_xml(df_file, output_xml, orig_xml)
-                    else:
-                        output_xml = os.path.join(session_dir, f"cv_results_{orig_base_name}.xml")
-                        export_to_xml(df_file, output_xml, orig_xml)
-                    download_url = url_for('download_file', session_id=session_id, filename=os.path.basename(output_xml))
-                    download_links.append({'name': os.path.basename(output_xml), 'url': download_url})
-                    if export_format == 'bimstep':
-                        journal_path = os.path.join(session_dir, 'JournalBimStep.xml')
-                        if os.path.exists(journal_path):
-                            journal_download_url = url_for('download_file', session_id=session_id, filename='JournalBimStep.xml')
-                            download_links.append({'name': 'JournalBimStep.xml', 'url': journal_download_url})
-            # detailed_stats
-            detailed_stats = []
-            for orig_xml in orig_xmls:
-                orig_filename = os.path.basename(orig_xml)
-                df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
-                if not df_file.empty:
-                    pred_source = df_file['original_prediction_source'].combine_first(df_file['prediction_source']) if 'original_prediction_source' in df_file.columns else df_file['prediction_source']
-                    pred_value = df_file['original_cv_prediction'].combine_first(df_file['cv_prediction']) if 'original_cv_prediction' in df_file.columns else df_file['cv_prediction']
-                    algorithm_approved = int(((pred_source == 'algorithm') & (pred_value == 0)).sum())
-                    algorithm_active = int(((pred_source == 'algorithm') & (pred_value == 1)).sum())
-                    algorithm_reviewed = int(((pred_source == 'algorithm') & (pred_value == -1)).sum())
-                    model_mask = pred_source.isin(['model', 'model_uncertain'])
-                    model_approved = int(((model_mask) & (pred_value == 0)).sum())
-                    model_active = int(((model_mask) & (pred_value == 1)).sum())
-                    model_reviewed = int(((model_mask) & (pred_value == -1)).sum())
-                    manual_approved = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 0)).sum())
-                    manual_active = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 1)).sum())
-                    manual_reviewed = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == -1)).sum())
-                    status_counts_file = df_file['cv_status'].value_counts().to_dict()
-                    detailed_stats.append({
-                        'file_name': orig_filename,
-                        'total_collisions': len(df_file),
-                        'algorithm': {
-                            'approved': algorithm_approved,
-                            'active': algorithm_active,
-                            'reviewed': algorithm_reviewed
-                        },
-                        'model': {
-                            'approved': model_approved,
-                            'active': model_active,
-                            'reviewed': model_reviewed
-                        },
-                        'manual': {
-                            'approved': manual_approved,
-                            'active': manual_active,
-                            'reviewed': manual_reviewed
-                        },
-                        'status_counts': status_counts_file
-                    })
-            # Сохраняем актуальный DataFrame
-            df_with_manual.to_csv(df_path, index=False)
-            return jsonify({'success': True, 'status_counts': status_counts, 'download_links': download_links, 'detailed_stats': detailed_stats})
-        return jsonify({'success': True})
+            # Пробуем разные способы чтения CSV
+            df_combined = None
+            try:
+                df_combined = pd.read_csv(df_path, encoding='utf-8')
+            except UnicodeDecodeError:
+                try:
+                    df_combined = pd.read_csv(df_path, encoding='latin-1')
+                except Exception as e:
+                    logger.error(f"[manual_review] Ошибка чтения CSV: {e}")
+                    return jsonify({'error': 'Ошибка чтения данных анализа'}), 500
+            
+            if df_combined is None or df_combined.empty:
+                logger.error(f"[manual_review] DataFrame пустой после чтения")
+                return jsonify({'error': 'Данные анализа повреждены'}), 500
+        
+        df_with_manual = apply_manual_review(df_combined, session_dir)
+        # value_counts по статусу
+        status_counts = df_with_manual['cv_status'].value_counts().to_dict()
+        # Переэкспорт XML
+        orig_xmls = []
+        for f in os.listdir(session_dir):
+            if f.endswith('.xml') and not f.startswith(('cv_results_', 'bimstep_results_', 'JournalBimStep')):
+                orig_xmls.append(os.path.join(session_dir, f))
+        settings = load_settings()
+        export_format = settings.get('export_format', 'standard')
+        download_links = []
+        for orig_xml in orig_xmls:
+            orig_filename = os.path.basename(orig_xml)
+            orig_base_name = os.path.splitext(orig_filename)[0]
+            df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
+            if not df_file.empty:
+                if export_format == 'bimstep':
+                    output_xml = os.path.join(session_dir, f"bimstep_results_{orig_base_name}.xml")
+                    export_to_bimstep_xml(df_file, output_xml, orig_xml)
+                else:
+                    output_xml = os.path.join(session_dir, f"cv_results_{orig_base_name}.xml")
+                    export_to_xml(df_file, output_xml, orig_xml)
+                download_url = url_for('download_file', session_id=session_id, filename=os.path.basename(output_xml))
+                download_links.append({'name': os.path.basename(output_xml), 'url': download_url})
+                if export_format == 'bimstep':
+                    journal_path = os.path.join(session_dir, 'JournalBimStep.xml')
+                    if os.path.exists(journal_path):
+                        journal_download_url = url_for('download_file', session_id=session_id, filename='JournalBimStep.xml')
+                        download_links.append({'name': 'JournalBimStep.xml', 'url': journal_download_url})
+        # detailed_stats
+        detailed_stats = []
+        for orig_xml in orig_xmls:
+            orig_filename = os.path.basename(orig_xml)
+            df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
+            if not df_file.empty:
+                pred_source = df_file['original_prediction_source'].combine_first(df_file['prediction_source']) if 'original_prediction_source' in df_file.columns else df_file['prediction_source']
+                pred_value = df_file['original_cv_prediction'].combine_first(df_file['cv_prediction']) if 'original_cv_prediction' in df_file.columns else df_file['cv_prediction']
+                algorithm_approved = int(((pred_source == 'algorithm') & (pred_value == 0)).sum())
+                algorithm_active = int(((pred_source == 'algorithm') & (pred_value == 1)).sum())
+                algorithm_reviewed = int(((pred_source == 'algorithm') & (pred_value == -1)).sum())
+                model_mask = pred_source.isin(['model', 'model_uncertain'])
+                model_approved = int(((model_mask) & (pred_value == 0)).sum())
+                model_active = int(((model_mask) & (pred_value == 1)).sum())
+                model_reviewed = int(((model_mask) & (pred_value == -1)).sum())
+                manual_approved = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 0)).sum())
+                manual_active = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 1)).sum())
+                manual_reviewed = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == -1)).sum())
+                status_counts_file = df_file['cv_status'].value_counts().to_dict()
+                detailed_stats.append({
+                    'file_name': orig_filename,
+                    'total_collisions': len(df_file),
+                    'algorithm': {
+                        'approved': algorithm_approved,
+                        'active': algorithm_active,
+                        'reviewed': algorithm_reviewed
+                    },
+                    'model': {
+                        'approved': model_approved,
+                        'active': model_active,
+                        'reviewed': model_reviewed
+                    },
+                    'manual': {
+                        'approved': manual_approved,
+                        'active': manual_active,
+                        'reviewed': manual_reviewed
+                    },
+                    'status_counts': status_counts_file
+                })
+        # Сохраняем актуальный DataFrame
+        try:
+            df_with_manual.to_csv(df_path, index=False, encoding='utf-8')
+        except Exception as e:
+            logger.warning(f"[manual_review] Ошибка сохранения CSV: {e}")
+            try:
+                # Альтернативный способ сохранения
+                temp_csv_path = os.path.join(session_dir, 'df_with_inference_temp.csv')
+                df_with_manual.to_csv(temp_csv_path, index=False, encoding='utf-8')
+                if os.path.exists(df_path):
+                    os.remove(df_path)
+                os.rename(temp_csv_path, df_path)
+            except Exception as e2:
+                logger.error(f"[manual_review] Не удалось сохранить CSV: {e2}")
+        
+        return jsonify({'success': True, 'status_counts': status_counts, 'download_links': download_links, 'detailed_stats': detailed_stats})
     except Exception as e:
         logger.error(f"Ошибка сохранения ручной разметки: {e}")
         import traceback
@@ -930,7 +1017,22 @@ def api_updated_stats(session_id):
         if not os.path.exists(df_path):
             logger.error(f"Файл с инференсом не найден: {df_path}")
             return jsonify({'error': 'Нет данных для обновления статистики. Проведите анализ заново.'}), 400
-        df_combined = pd.read_csv(df_path)
+        
+        # Пробуем разные способы чтения CSV
+        df_combined = None
+        try:
+            df_combined = pd.read_csv(df_path, encoding='utf-8')
+        except UnicodeDecodeError:
+            try:
+                df_combined = pd.read_csv(df_path, encoding='latin-1')
+            except Exception as e:
+                logger.error(f"[api_updated_stats] Ошибка чтения CSV: {e}")
+                return jsonify({'error': 'Ошибка чтения данных анализа'}), 500
+        
+        if df_combined is None or df_combined.empty:
+            logger.error(f"[api_updated_stats] DataFrame пустой после чтения")
+            return jsonify({'error': 'Данные анализа повреждены'}), 500
+        
         # Применяем ручную разметку
         df_with_manual = apply_manual_review(df_combined, session_dir)
         
@@ -1042,7 +1144,20 @@ def api_updated_stats(session_id):
                         download_links.append({'name': 'JournalBimStep.xml', 'url': journal_download_url})
         # --- Конец блока ---
         # Перезаписываем df_with_inference.csv актуальным DataFrame с ручной разметкой
-        df_with_manual.to_csv(os.path.join(session_dir, 'df_with_inference.csv'), index=False)
+        try:
+            df_with_manual.to_csv(os.path.join(session_dir, 'df_with_inference.csv'), index=False, encoding='utf-8')
+        except Exception as e:
+            logger.warning(f"[api_updated_stats] Ошибка сохранения CSV: {e}")
+            try:
+                # Альтернативный способ сохранения
+                temp_csv_path = os.path.join(session_dir, 'df_with_inference_temp.csv')
+                df_with_manual.to_csv(temp_csv_path, index=False, encoding='utf-8')
+                csv_path = os.path.join(session_dir, 'df_with_inference.csv')
+                if os.path.exists(csv_path):
+                    os.remove(csv_path)
+                os.rename(temp_csv_path, csv_path)
+            except Exception as e2:
+                logger.error(f"[api_updated_stats] Не удалось сохранить CSV: {e2}")
         
         logger.info(f"Возвращаем обновленную статистику: {full_response}")
         logger.info(f"Детальная статистика содержит {len(detailed_stats)} файлов")
@@ -1064,14 +1179,28 @@ def download_file(session_id, filename):
         if not session_dir or not os.path.exists(session_dir):
             logger.debug(f"DOWNLOAD: session_dir not found or does not exist")
             return "Файл не найден", 404
-        file_path = os.path.join(session_dir, filename)
+        
+        # Декодируем URL-encoded путь
+        decoded_filename = urllib.parse.unquote(filename)
+        
+        # Проверяем, является ли путь абсолютным (начинается с /)
+        if decoded_filename.startswith('/'):
+            # Это абсолютный путь, проверяем, находится ли он в session_dir
+            if not decoded_filename.startswith(session_dir):
+                logger.debug(f"DOWNLOAD: absolute path outside session_dir: {decoded_filename}")
+                return "Доступ запрещен", 403
+            file_path = decoded_filename
+        else:
+            # Обычный относительный путь
+            file_path = os.path.join(session_dir, decoded_filename)
+        
         logger.debug(f"DOWNLOAD: file_path={file_path}")
         
         if not os.path.exists(file_path):
             logger.debug(f"DOWNLOAD: file_path does not exist: {file_path}")
             return "Файл не найден", 404
         logger.debug(f"DOWNLOAD: sending file {file_path}")
-        return send_file(file_path, as_attachment=True, download_name=filename)
+        return send_file(file_path, as_attachment=True, download_name=os.path.basename(file_path))
     except Exception as e:
         logger.error(f"Ошибка скачивания файла: {e}")
         return "Ошибка скачивания", 500

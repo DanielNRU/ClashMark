@@ -18,5 +18,25 @@
     ],
     "epochs": 5,
     "batch_size": 16
+  },
+  {
+    "train_time": "2025-07-19T21:29:03.372475",
+    "model_file": "model_20250719_212541.pt",
+    "final_accuracy": 0.9743589743589743,
+    "final_f1": 0.9747899159663865,
+    "final_recall": 1.0,
+    "final_precision": 0.9508196721311475,
+    "confusion_matrix": [
+      [
+        56,
+        3
+      ],
+      [
+        0,
+        58
+      ]
+    ],
+    "epochs": 10,
+    "batch_size": 16
   }
 ]
