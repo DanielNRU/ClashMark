@@ -1534,6 +1534,7 @@ def api_train():
                     return
                 
                 model_type = settings.get('model_type', 'mobilenet_v3_small')
+                pretty_model_type = prettify_model_type(model_type)
                 metrics = train_model(df_visual_filtered, epochs=epochs, batch_size=batch_size, progress_callback=progress_callback, model_filename=model_name, model_type=model_type)
                 if metrics is None:
                     update_train_progress({'status': 'error', 'log': 'Обучение не запущено: в обучающей выборке только один класс!'}, session_dir)
@@ -1547,7 +1548,8 @@ def api_train():
                     'metrics': metrics,
                     'category_pairs': pairs_with_counts,
                     'epochs': epochs,
-                    'batch_size': batch_size
+                    'batch_size': batch_size,
+                    'model_type': pretty_model_type
                 }
                 stats_path = os.path.join('model', f'{model_name}_stats.json')
                 with open(stats_path, 'w', encoding='utf-8') as f:
@@ -1564,7 +1566,7 @@ def api_train():
                     "confusion_matrix": stats['metrics'].get('confusion_matrix'),
                     "epochs": stats['epochs'],
                     "batch_size": stats['batch_size'],
-                    "model_type": model_type
+                    "model_type": pretty_model_type
                 }
                 if os.path.exists(log_path):
                     with open(log_path, 'r', encoding='utf-8') as f:
@@ -1642,6 +1644,15 @@ def api_model_info():
                 model_type = entry.get('model_type')
                 break
     return jsonify({'model_type': model_type or 'mobilenet_v3_small'})
+
+def prettify_model_type(model_type):
+    mapping = {
+        'mobilenet_v3_small': 'mobilenet v3 small',
+        'efficientnet_b0': 'efficientnet b0',
+        'resnet18': 'resnet 18',
+        'mobilenet_v2': 'mobilenet v2',
+    }
+    return mapping.get(model_type, model_type.replace('_', ' '))
 
 if __name__ == '__main__':
     app.run(debug=True) 
