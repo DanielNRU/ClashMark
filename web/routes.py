@@ -279,6 +279,19 @@ def analyze_files():
             return jsonify({'error': 'Не выбраны XML файлы!', 'analysis_settings': analysis_settings})
         if export_format == 'standard' and not zip_files:
             return jsonify({'error': 'Для стандартного формата необходимо загрузить ZIP архивы с изображениями!', 'analysis_settings': analysis_settings})
+        
+        # Очищаем старые сессии (оставляем только последние 5)
+        if len(session_dirs) > 5:
+            old_sessions = list(session_dirs.keys())[:-5]
+            for old_session_id in old_sessions:
+                old_session_dir = session_dirs.pop(old_session_id, None)
+                if old_session_dir and os.path.exists(old_session_dir):
+                    try:
+                        shutil.rmtree(old_session_dir)
+                        logger.info(f"Очищена старая сессия: {old_session_id}")
+                    except Exception as e:
+                        logger.warning(f"Не удалось очистить сессию {old_session_id}: {e}")
+        
         session_dir = tempfile.mkdtemp(prefix='analysis_session_')
         session_id = os.path.basename(session_dir)
         session_dirs[session_id] = session_dir
@@ -356,6 +369,10 @@ def analyze_files():
             df_need_images = df.loc[need_images_mask].copy()
             if 'image_href' in df_need_images.columns:
                 df.loc[need_images_mask, 'image_file'] = resolve_images_vectorized_series(df_need_images['image_href'], image_index, session_dir)
+                # Логируем несколько примеров путей к изображениям для отладки
+                sample_paths = df.loc[need_images_mask, 'image_file'].dropna().head(3)
+                for i, path in enumerate(sample_paths):
+                    logger.info(f"Sample image path {i+1}: {path}")
             else:
                 df.loc[need_images_mask, 'image_file'] = ''
             df.loc[need_images_mask, :] = filter_valid_images(df.loc[need_images_mask, :])
@@ -593,7 +610,13 @@ def analyze_files():
                     if image_path and image_path.startswith(session_dir):
                         rel_image_path = os.path.relpath(image_path, session_dir)
                     elif image_path:
-                        rel_image_path = image_path
+                        # Если путь не начинается с session_dir, извлекаем только имя файла
+                        # и предполагаем, что он находится в BSImages
+                        filename = os.path.basename(image_path)
+                        if filename:
+                            rel_image_path = os.path.join('BSImages', filename)
+                        else:
+                            rel_image_path = ''
                     else:
                         rel_image_path = ''
                     # Логгируем для отладки
@@ -1195,6 +1218,23 @@ def download_file(session_id, filename):
                     if os.path.exists(macos_path):
                         logger.debug(f"DOWNLOAD: found macOS path: {macos_path}")
                         return send_file(macos_path, as_attachment=True, download_name=os.path.basename(macos_path))
+                
+                # Если путь содержит старую сессию, попробуем найти файл в текущей сессии
+                if 'analysis_session_' in decoded_filename:
+                    # Извлекаем имя файла и ищем его в текущей сессии
+                    filename_only = os.path.basename(decoded_filename)
+                    if filename_only:
+                        # Ищем в BSImages
+                        bsimages_path = os.path.join(session_dir, 'BSImages', filename_only)
+                        if os.path.exists(bsimages_path):
+                            logger.debug(f"DOWNLOAD: found in BSImages: {bsimages_path}")
+                            return send_file(bsimages_path, as_attachment=True, download_name=filename_only)
+                        # Ищем в корне сессии
+                        root_path = os.path.join(session_dir, filename_only)
+                        if os.path.exists(root_path):
+                            logger.debug(f"DOWNLOAD: found in root: {root_path}")
+                            return send_file(root_path, as_attachment=True, download_name=filename_only)
+                
                 logger.debug(f"DOWNLOAD: absolute path outside session_dir: {decoded_filename}")
                 return "Доступ запрещен", 403
             file_path = decoded_filename
