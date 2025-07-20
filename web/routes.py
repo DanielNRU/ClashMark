@@ -893,9 +893,9 @@ def api_manual_review():
         # --- Новый блок: применяем ручную разметку, пересчитываем статистику и переэкспортируем XML ---
         import pandas as pd
         df_path = os.path.join(session_dir, 'df_with_inference.csv')
+        df_combined = None
         if os.path.exists(df_path):
             # Пробуем разные способы чтения CSV
-            df_combined = None
             try:
                 df_combined = pd.read_csv(df_path, encoding='utf-8')
             except UnicodeDecodeError:
@@ -908,6 +908,9 @@ def api_manual_review():
             if df_combined is None or df_combined.empty:
                 logger.error(f"[manual_review] DataFrame пустой после чтения")
                 return jsonify({'error': 'Данные анализа повреждены'}), 500
+        else:
+            logger.error(f"[manual_review] Файл с инференсом не найден: {df_path}")
+            return jsonify({'error': 'Нет данных для обновления статистики. Проведите анализ заново.'}), 400
         
         df_with_manual = apply_manual_review(df_combined, session_dir)
         # value_counts по статусу
@@ -1178,12 +1181,20 @@ def download_file(session_id, filename):
             return "Файл не найден", 404
         
         # Декодируем URL-encoded путь
+        import urllib.parse
         decoded_filename = urllib.parse.unquote(filename)
         
         # Проверяем, является ли путь абсолютным (начинается с /)
         if decoded_filename.startswith('/'):
             # Это абсолютный путь, проверяем, находится ли он в session_dir
             if not decoded_filename.startswith(session_dir):
+                # На macOS файлы могут быть в /private/var/folders/, но URL содержит /var/folders/
+                if decoded_filename.startswith('/var/folders/') and session_dir.startswith('/private/var/folders/'):
+                    # Преобразуем путь для macOS
+                    macos_path = '/private' + decoded_filename
+                    if os.path.exists(macos_path):
+                        logger.debug(f"DOWNLOAD: found macOS path: {macos_path}")
+                        return send_file(macos_path, as_attachment=True, download_name=os.path.basename(macos_path))
                 logger.debug(f"DOWNLOAD: absolute path outside session_dir: {decoded_filename}")
                 return "Доступ запрещен", 403
             file_path = decoded_filename

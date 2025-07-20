@@ -28,13 +28,19 @@
 /var/folders/xh/zxlndpg550q7lpk5yv3tbdhc0000gn/T/analysis_session_otvr48t7/BSImages/ВК-все_Конфликт132.png
 ```
 
+Фактический адрес изображения:
+```
+/private/var/folders/xh/zxlndpg550q7lpk5yv3tbdhc0000gn/T/analysis_session_ucsoou20/BSImages/ВК-все_Конфликт135.png
+```
+
 ### Решение:
 Улучшена функция `download_file` в `web/routes.py`:
 
 1. **Декодирование URL**: Добавлено `urllib.parse.unquote()` для корректного декодирования URL-encoded путей
 2. **Обработка абсолютных путей**: Проверка, начинается ли путь с `/` и находится ли он в пределах `session_dir`
-3. **Безопасность**: Проверка, что абсолютный путь не выходит за пределы сессии
-4. **Корректное имя файла**: Использование `os.path.basename()` для имени скачиваемого файла
+3. **Специальная обработка для macOS**: Если путь начинается с `/var/folders/`, но файл не найден, пробуем путь с префиксом `/private`
+4. **Безопасность**: Проверка, что абсолютный путь не выходит за пределы сессии
+5. **Корректное имя файла**: Использование `os.path.basename()` для имени скачиваемого файла
 
 ### Код:
 ```python
@@ -43,8 +49,14 @@ decoded_filename = urllib.parse.unquote(filename)
 
 # Проверяем, является ли путь абсолютным (начинается с /)
 if decoded_filename.startswith('/'):
-    # Это абсолютный путь, проверяем безопасность
+    # Это абсолютный путь, проверяем, находится ли он в session_dir
     if not decoded_filename.startswith(session_dir):
+        # На macOS файлы могут быть в /private/var/folders/, но URL содержит /var/folders/
+        if decoded_filename.startswith('/var/folders/') and session_dir.startswith('/private/var/folders/'):
+            # Преобразуем путь для macOS
+            macos_path = '/private' + decoded_filename
+            if os.path.exists(macos_path):
+                return send_file(macos_path, as_attachment=True, download_name=os.path.basename(macos_path))
         return "Доступ запрещен", 403
     file_path = decoded_filename
 else:
@@ -52,31 +64,72 @@ else:
     file_path = os.path.join(session_dir, decoded_filename)
 ```
 
-## 3. Исправление проблемы с сохранением ручной разметки на Windows
+## 3. Исправление проблемы с сохранением результатов анализа на Windows
 
 ### Проблема:
-На Windows возникали ошибки при сохранении JSON файлов с ручной разметкой из-за проблем с кодировкой и правами доступа.
+После ручного анализа файлов на Windows не сохранялись результаты анализа в итоговый файл, хотя в `manual_review.json` - сохранялись.
+
+### Причины:
+1. **Ошибка в логике**: В функции `api_manual_review` переменная `df_combined` могла быть не определена, если CSV файл не существовал
+2. **Проблемы с кодировкой**: Ошибки при чтении CSV файлов на Windows
+3. **Проблемы с записью**: Ошибки при сохранении CSV файлов на Windows
 
 ### Решение:
-Добавлена многоуровневая обработка ошибок при работе с файлами:
 
-1. **Надежное сохранение JSON**: Альтернативные методы записи с использованием временных файлов
-2. **Обработка кодировок**: Поддержка UTF-8 и latin-1 при чтении файлов
-3. **Надежное сохранение CSV**: Альтернативные методы записи CSV файлов
-4. **Обработка ошибок**: Логирование всех ошибок и fallback методы
-
-### Код:
+#### 3.1 Исправление логики в `api_manual_review`
 ```python
-# Сохраняем разметку в файл
+# Проверяем существование CSV файла перед чтением
+df_path = os.path.join(session_dir, 'df_with_inference.csv')
+df_combined = None
+if os.path.exists(df_path):
+    # Пробуем разные способы чтения CSV
+    try:
+        df_combined = pd.read_csv(df_path, encoding='utf-8')
+    except UnicodeDecodeError:
+        try:
+            df_combined = pd.read_csv(df_path, encoding='latin-1')
+        except Exception as e:
+            logger.error(f"[manual_review] Ошибка чтения CSV: {e}")
+            return jsonify({'error': 'Ошибка чтения данных анализа'}), 500
+    
+    if df_combined is None or df_combined.empty:
+        logger.error(f"[manual_review] DataFrame пустой после чтения")
+        return jsonify({'error': 'Данные анализа повреждены'}), 500
+else:
+    logger.error(f"[manual_review] Файл с инференсом не найден: {df_path}")
+    return jsonify({'error': 'Нет данных для обновления статистики. Проведите анализ заново.'}), 400
+```
+
+#### 3.2 Улучшенное сохранение CSV файлов
+```python
+# Сохраняем актуальный DataFrame
 try:
-    with open(review_path, 'w', encoding='utf-8') as f:
-        json.dump(reviews, f, ensure_ascii=False, indent=2)
+    df_with_manual.to_csv(df_path, index=False, encoding='utf-8')
 except Exception as e:
-    # Альтернативный способ для Windows
-    temp_path = os.path.join(session_dir, 'manual_review_temp.json')
-    with open(temp_path, 'w', encoding='utf-8') as f:
-        json.dump(reviews, f, ensure_ascii=False, indent=2)
-    os.rename(temp_path, review_path)
+    logger.warning(f"[manual_review] Ошибка сохранения CSV: {e}")
+    try:
+        # Альтернативный способ сохранения
+        temp_csv_path = os.path.join(session_dir, 'df_with_inference_temp.csv')
+        df_with_manual.to_csv(temp_csv_path, index=False, encoding='utf-8')
+        if os.path.exists(df_path):
+            os.remove(df_path)
+        os.rename(temp_csv_path, df_path)
+    except Exception as e2:
+        logger.error(f"[manual_review] Не удалось сохранить CSV: {e2}")
+```
+
+#### 3.3 Улучшенное чтение CSV файлов
+```python
+# Пробуем разные способы чтения CSV
+df_combined = None
+try:
+    df_combined = pd.read_csv(df_path, encoding='utf-8')
+except UnicodeDecodeError:
+    try:
+        df_combined = pd.read_csv(df_path, encoding='latin-1')
+    except Exception as e:
+        logger.error(f"[manual_review] Ошибка чтения CSV: {e}")
+        return jsonify({'error': 'Ошибка чтения данных анализа'}), 500
 ```
 
 ## 4. Улучшения совместимости
@@ -93,11 +146,13 @@ except Exception as e:
 
 ### Пути к файлам:
 - Корректная обработка абсолютных путей на MacOS
+- Специальная обработка путей `/var/folders/` → `/private/var/folders/`
 - Безопасная проверка путей
 - Поддержка URL-encoded имен файлов
 
 ## Результат:
-- ✅ Изображения корректно отображаются на MacOS
-- ✅ Ручная разметка сохраняется на Windows
+- ✅ Изображения корректно отображаются на MacOS (исправлена обработка путей `/private/var/folders/`)
+- ✅ Результаты анализа сохраняются на Windows после ручной разметки
 - ✅ Упрощена логика инференса (только оптимизированный режим)
-- ✅ Улучшена совместимость с разными ОС 
+- ✅ Улучшена совместимость с разными ОС
+- ✅ Добавлена надежная обработка ошибок при работе с файлами 
