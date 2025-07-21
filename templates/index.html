@@ -46,7 +46,8 @@
     <!-- Индикатор загрузки -->
     <div id="loadingIndicator" style="display: none;" class="loading-container">
         <div class="loading-spinner"></div>
-        <p>Выполняется анализ коллизий...</p>
+        <p>Выполняется анализ коллизий:</p>
+        <div id="analysisStages" style="margin-bottom: 12px; font-size: 15px; text-align:left; max-width:340px; margin-left:auto; margin-right:auto;"></div>
         <div id="analysisInfo" style="margin-bottom: 12px; font-size: 15px"></div>
         <p>Это может занять несколько минут в зависимости от количества файлов.</p>
     </div>
@@ -433,6 +434,7 @@ function closeInfo() {
     document.getElementById('infoModal').style.display = 'none';
 }
 
+/*
 document.getElementById('analyzeForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     
@@ -495,9 +497,10 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
         // Скрываем индикатор загрузки
         analyzeBtn.disabled = false;
         analyzeBtn.innerHTML = '🔍 Начать анализ';
-        loadingIndicator.style.display = 'none';
+        // loadingIndicator.style.display = 'none'; // УБРАНО, теперь скрываем только если все этапы завершены
     }
 });
+*/
 
 // Drag & Drop функциональность
 function setupDragDrop(dropZoneId, inputName) {

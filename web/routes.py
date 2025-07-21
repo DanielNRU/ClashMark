@@ -46,6 +46,227 @@ ALLOWED_EXTENSIONS = {'xml', 'zip'}
 
 # Словарь для хранения соответствий между session_id и путями к временным папкам
 session_dirs = {}
+#Словарь для хранения прогресса анализа
+analysis_progress = {}
+
+def update_analysis_progress(session_id, key, status):
+    """Обновляет статус конкретного этапа анализа."""
+    if session_id in analysis_progress:
+        # Устанавливаем статус для указанного ключа
+        for stage in analysis_progress[session_id].get('stage_statuses', []):
+            if stage['key'] == key:
+                stage['status'] = status
+                break
+        
+        # Если этап перешел в 'in_progress', все предыдущие должны быть 'done'
+        if status == 'in_progress':
+            stage_order = ['algorithm', 'model', 'manual']
+            current_index = stage_order.index(key)
+            for i in range(current_index):
+                prev_key = stage_order[i]
+                for stage in analysis_progress[session_id].get('stage_statuses', []):
+                    if stage['key'] == prev_key and stage['enabled']:
+                        stage['status'] = 'done'
+
+
+def run_analysis_background(session_id, session_dir, xml_path_name_pairs, zip_paths, settings):
+    """Эта функция выполняется в фоновом потоке для обработки анализа."""
+    with app.app_context():
+        try:
+            import pandas as pd
+            import torch
+            from core.image_utils import build_image_index_with_cache, resolve_images_vectorized_series
+            from core.xml_utils import get_pairs_vectorized, filter_valid_images
+            from ml.model import get_cached_model, create_model, get_model_info
+            from ml.dataset import create_transforms
+            
+            export_format = settings.get('export_format', 'standard')
+            inference_mode = settings.get('inference_mode', 'model')
+            low_confidence = settings.get('low_confidence', 0.3)
+            high_confidence = settings.get('high_confidence', 0.7)
+            manual_review_enabled = settings.get('manual_review_enabled', False)
+            
+            # --- Распаковка файлов ---
+            if zip_paths:
+                for zip_path in zip_paths:
+                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                        zip_ref.extractall(session_dir)
+
+            # --- Индексация изображений ---
+            image_index = get_or_build_image_index(session_dir)
+
+            # --- Парсинг XML ---
+            def parse_one(args):
+                xml_path, safe_filename = args
+                df_part = parse_xml_data(xml_path, export_format=export_format)
+                if df_part.empty: return None
+                df_part['source_file'] = safe_filename
+                return df_part
+            
+            with ThreadPoolExecutor() as executor:
+                dfs = list(executor.map(parse_one, xml_path_name_pairs))
+            dfs = [df for df in dfs if df is not None]
+
+            if not dfs:
+                raise ValueError("Не удалось обработать XML файлы!")
+            df = pd.concat(dfs, ignore_index=True)
+
+            # --- Алгоритмическая разметка ---
+            update_analysis_progress(session_id, 'algorithm', 'in_progress')
+            # (логика алгоритмической разметки...)
+            pairs = load_all_category_pairs('category_pairs.yaml')
+            can_pairs = set(tuple(sorted(p)) for p in pairs.get('can', []))
+            cannot_pairs = set(tuple(sorted(p)) for p in pairs.get('cannot', []))
+            visual_pairs = set(tuple(sorted(p)) for p in pairs.get('visual', []))
+            pairs_series = get_pairs_vectorized(df)
+            mask_can = pairs_series.isin(list(can_pairs))
+            mask_cannot = pairs_series.isin(list(cannot_pairs))
+            mask_visual = pairs_series.isin(list(visual_pairs))
+            mask_unknown = ~(mask_can | mask_cannot | mask_visual)
+            df['cv_prediction'] = -1
+            df['cv_confidence'] = 0.5
+            df['prediction_source'] = 'algorithm'
+            df['cv_status'] = 'Reviewed'
+            df.loc[mask_can, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [0, 1.0, 'algorithm', 'Approved']
+            df.loc[mask_cannot, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [1, 1.0, 'algorithm', 'Active']
+            update_analysis_progress(session_id, 'algorithm', 'done')
+            
+            # --- Поиск изображений ---
+            need_images_mask = (df['cv_prediction'] == -1)
+            if need_images_mask.any():
+                df_need_images = df.loc[need_images_mask]
+                if 'image_href' in df_need_images.columns:
+                    df.loc[need_images_mask, 'image_file'] = resolve_images_vectorized_series(df_need_images['image_href'], image_index, session_dir, parallel=True)
+                else:
+                     df.loc[need_images_mask, 'image_file'] = ''
+                df.loc[need_images_mask, :] = filter_valid_images(df.loc[need_images_mask, :])
+
+            # --- Инференс модели ---
+            if inference_mode == 'model':
+                visual_mask_combined = mask_visual | mask_unknown
+                if visual_mask_combined.any():
+                    update_analysis_progress(session_id, 'model', 'in_progress')
+                    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                    visual_df = df.loc[visual_mask_combined].copy()
+                    transform = create_transforms(is_training=False)
+                    model_path = os.path.join('model', settings.get('model_file', 'model_clashmark.pt'))
+                    
+                    def get_model_type_for_file(model_file):
+                        log_path = os.path.join('model', 'model_train_log.json')
+                        if model_file and os.path.exists(log_path):
+                            with open(log_path, 'r', encoding='utf-8') as f: logs = json.load(f)
+                            if isinstance(logs, dict): logs = [logs]
+                            for entry in logs:
+                                if entry.get('model_file') == model_file:
+                                    mt = entry.get('model_type', 'mobilenet_v3_small')
+                                    mapping = {'MobileNetV3 Small': 'mobilenet_v3_small', 'EfficientNet-B0': 'efficientnet_b0', 'ResNet 18': 'resnet18', 'MobileNetV2': 'mobilenet_v2'}
+                                    return mapping.get(mt, mt)
+                        return settings.get('model_type', 'mobilenet_v3_small')
+
+                    model_type = get_model_type_for_file(settings.get('model_file')) or 'mobilenet_v3_small'
+                    model = get_cached_model(device, model_path, model_type, True)
+                    model.eval()
+                    visual_pred_df = predict(
+                        model=model,
+                        device=device,
+                        df=visual_df,
+                        transform=transform,
+                        batch_size=16,
+                        low_confidence_threshold=low_confidence,
+                        high_confidence_threshold=high_confidence,
+                        session_dir=session_dir
+                    )
+
+                    visual_indices = visual_df.index
+                    df.loc[visual_indices, 'cv_prediction'] = visual_pred_df['cv_prediction'].values
+                    df.loc[visual_indices, 'cv_confidence'] = visual_pred_df['cv_confidence'].values
+                    df.loc[visual_indices, 'prediction_source'] = visual_pred_df['prediction_source'].values
+                    df.loc[visual_indices, 'cv_status'] = visual_pred_df['cv_status'].values
+                    
+                    update_analysis_progress(session_id, 'model', 'done')
+            
+            # ... (Остальная логика для подготовки ответа, как была в analyze_files)
+            # Сохраняем промежуточный CSV
+            df.to_csv(os.path.join(session_dir, 'df_with_inference.csv'), index=False, encoding='utf-8')
+            
+            # --- Подготовка финального ответа ---
+            # Эта логика теперь здесь, в конце фоновой задачи
+            df_with_manual = apply_manual_review(df.copy(), session_dir)
+            download_links = []
+            stats_per_file = []
+            detailed_stats = []
+
+            for xml_path, orig_filename in xml_path_name_pairs:
+                df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
+                if df_file.empty:
+                    continue
+
+                orig_base_name = os.path.splitext(orig_filename)[0]
+                
+                if export_format == 'bimstep':
+                    output_xml = os.path.join(session_dir, f"bimstep_results_{orig_base_name}.xml")
+                    export_to_bimstep_xml(df_file, output_xml, xml_path)
+                    # Добавляем запись в журнал для каждой строки
+                    for _, row in df_file.iterrows():
+                         if row.get('cv_prediction') is not None:
+                            status_map = {0: 'approved', 1: 'active', -1: 'reviewed'}
+                            status = status_map.get(row.get('cv_prediction'), 'reviewed')
+                            add_bimstep_journal_entry(
+                                row.get('clash_uid', ''), 'Разметка ClashMark', 'Разметка ClashMark',
+                                status=status, session_dir=session_dir
+                            )
+                else: # 'standard'
+                    output_xml = os.path.join(session_dir, f"cv_results_{orig_base_name}.xml")
+                    export_to_xml(df_file, output_xml, xml_path)
+
+                download_filename = f"{orig_base_name}.xml" # Use original name for download
+                download_url = f"/download/{session_id}/{urllib.parse.quote(os.path.basename(output_xml))}"
+                download_links.append({'name': download_filename, 'url': download_url})
+                # ... (здесь будет логика для stats_per_file и detailed_stats, если нужна) ...
+            
+            # После цикла добавляем ссылку на журнал, если он существует
+            if export_format == 'bimstep':
+                journal_path = os.path.join(session_dir, 'JournalBimStep.xml')
+                if os.path.exists(journal_path):
+                    journal_url = f"/download/{session_id}/JournalBimStep.xml"
+                    if not any(d['name'] == 'JournalBimStep.xml' for d in download_links):
+                        download_links.append({'name': 'JournalBimStep.xml', 'url': journal_url})
+
+            stats_total = {'total_files': len(xml_path_name_pairs), 'total_collisions': len(df_with_manual),
+                           'total_approved': int((df_with_manual['cv_prediction'] == 0).sum()),
+                           'total_active': int((df_with_manual['cv_prediction'] == 1).sum()),
+                           'total_reviewed': int((df_with_manual['cv_prediction'] == -1).sum())}
+
+            manual_review_collisions = []
+            if manual_review_enabled:
+                # ... (логика формирования списка для ручной разметки) ...
+                for _, row in df.iterrows():
+                    if row.get('cv_prediction') == -1 and pd.notna(row.get('image_file')):
+                        manual_review_collisions.append({
+                            'clash_uid': row.get('clash_uid', ''),
+                            'image_file': row.get('image_file', ''), # Просто передаем абсолютный путь
+                            'element1_category': row.get('element1_category', ''),
+                            'element2_category': row.get('element2_category', ''),
+                            'description': row.get('clash_name', ''),
+                            'source_file': row.get('source_file', ''),
+                            'session_id': session_id
+                        })
+            
+            final_result = {
+                'success': True,
+                'download_links': download_links,
+                'stats_total': stats_total,
+                'manual_review_collisions': manual_review_collisions,
+                'detailed_stats': detailed_stats
+            }
+            analysis_progress[session_id]['status'] = 'finished'
+            analysis_progress[session_id]['result'] = final_result
+            
+        except Exception as e:
+            logger.error(f"Ошибка в фоновом анализе для сессии {session_id}: {e}", exc_info=True)
+            analysis_progress[session_id]['status'] = 'error'
+            analysis_progress[session_id]['error'] = f'Внутренняя ошибка сервера: {e}'
+
 
 def apply_manual_review(df, session_dir):
     """Применяет ручную разметку к DataFrame из файла manual_review.json, обновляя только строки с clash_uid из разметки, остальные не трогает."""
@@ -288,6 +509,8 @@ def settings():
 @app.route('/api/settings', methods=['GET'])
 def api_settings():
     settings = load_settings()
+    if 'model_type' in settings:
+        settings['model_type_pretty'] = prettify_model_type(settings['model_type'])
     return jsonify(to_py(settings))
 
 def get_or_build_image_index(session_dir):
@@ -309,468 +532,68 @@ def get_or_build_image_index(session_dir):
         pass
     return index
 
+@app.route('/api/analysis_progress/<session_id>')
+def api_analysis_progress(session_id):
+    """Возвращает текущий прогресс анализа."""
+    progress = analysis_progress.get(session_id, {})
+    return jsonify(to_py(progress))
+
 @app.route('/analyze', methods=['POST'])
 def analyze_files():
-    print('TYPE OF time:', type(time))
-    print('START ANALYZE', time.perf_counter())
+    """Запускает анализ в фоновом режиме и немедленно возвращает session_id."""
     try:
-        import pandas as pd
-        import torch
-        from core.image_utils import build_image_index_with_cache, resolve_images_vectorized_series
-        from core.xml_utils import get_pairs_vectorized, filter_valid_images
-        from ml.model import get_cached_model, create_model, get_model_info
-        from ml.dataset import create_transforms
-        t_total = time.perf_counter()
-        t0 = time.perf_counter()
-        # --- Загрузка файлов ---
         xml_files = request.files.getlist('xml_file')
         zip_files = request.files.getlist('images_zip')
-        logger.info(f"[PROFILE] Загрузка файлов: {time.perf_counter() - t0:.2f} сек")
-        print(f"[PROFILE] Загрузка файлов: {time.perf_counter() - t0:.2f} сек")
-        t0 = time.perf_counter()
+        
         settings = load_settings()
-        export_format = settings.get('export_format', 'standard')
         inference_mode = settings.get('inference_mode', 'model')
-        low_confidence = settings.get('low_confidence', 0.3)
-        high_confidence = settings.get('high_confidence', 0.7)
         manual_review_enabled = settings.get('manual_review_enabled', False)
-        analysis_settings = {
-            'inference_mode': inference_mode,
-            'manual_review_enabled': manual_review_enabled,
-            'export_format': export_format,
-            'model_file': settings.get('model_file', 'model_clashmark.pt'),
-            'model_type': settings.get('model_type', 'mobilenet_v3_small')
-        }
+
         if not xml_files:
-            print('END ANALYZE', time.perf_counter())
-            return jsonify({'error': 'Не выбраны XML файлы!', 'analysis_settings': analysis_settings})
-        if export_format == 'standard' and not zip_files:
-            print('END ANALYZE', time.perf_counter())
-            return jsonify({'error': 'Для стандартного формата необходимо загрузить ZIP архивы с изображениями!', 'analysis_settings': analysis_settings})
-        # --- Распаковка файлов ---
-        t_unpack = time.perf_counter()
+            return jsonify({'error': 'Не выбраны XML файлы!'})
+
         session_dir = tempfile.mkdtemp(prefix='analysis_session_')
         session_id = os.path.basename(session_dir)
         session_dirs[session_id] = session_dir
-        xml_paths = []
-        zip_paths = []
-        original_xml_names = []
+
         xml_path_name_pairs = []
         for xml_file in xml_files:
-            if not xml_file.filename:
-                continue
+            if not xml_file.filename: continue
             safe_filename = safe_filename_with_cyrillic(xml_file.filename)
             xml_path = os.path.join(session_dir, safe_filename)
             xml_file.save(xml_path)
-            xml_paths.append(xml_path)
-            original_xml_names.append(os.path.splitext(safe_filename)[0])
             xml_path_name_pairs.append((xml_path, safe_filename))
+        
+        zip_paths = []
         if zip_files:
             for zip_file in zip_files:
-                if not zip_file.filename:
-                    continue
+                if not zip_file.filename: continue
                 zip_path = os.path.join(session_dir, safe_filename_with_cyrillic(zip_file.filename))
                 zip_file.save(zip_path)
                 zip_paths.append(zip_path)
-            for zip_path in zip_paths:
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(session_dir)
-        logger.info(f"[PROFILE] Распаковка файлов: {time.perf_counter() - t_unpack:.2f} сек")
-        print(f"[PROFILE] Распаковка файлов: {time.perf_counter() - t_unpack:.2f} сек")
-        # --- Индексация изображений ---
-        t_index = time.perf_counter()
-        image_index = get_or_build_image_index(session_dir)
-        logger.info(f"[PROFILE] Индексация изображений: {time.perf_counter() - t_index:.2f} сек")
-        print(f"[PROFILE] Индексация изображений: {time.perf_counter() - t_index:.2f} сек")
-        # --- Парсинг XML (параллельно) ---
-        t_parse = time.perf_counter()
-        def parse_one(args):
-            xml_path, safe_filename = args
-            df_part = parse_xml_data(xml_path, export_format=export_format)
-            if len(df_part) == 0:
-                return None
-            df_part['source_file'] = safe_filename
-            return df_part
-        with ThreadPoolExecutor() as executor:
-            dfs = list(executor.map(parse_one, xml_path_name_pairs))
-        dfs = [df for df in dfs if df is not None]
-        if not dfs:
-            print('END ANALYZE', time.perf_counter())
-            return jsonify({'error': 'Не удалось обработать XML файлы!', 'analysis_settings': analysis_settings})
-        df = pd.concat(dfs, ignore_index=True)
-        logger.info(f"[PROFILE] Парсинг XML: {time.perf_counter() - t_parse:.2f} сек")
-        print(f"[PROFILE] Парсинг XML: {time.perf_counter() - t_parse:.2f} сек")
-        # --- Алгоритмическая разметка ---
-        t_algo = time.perf_counter()
-        pairs = load_all_category_pairs('category_pairs.yaml')
-        can_pairs = set()
-        cannot_pairs = set()
-        visual_pairs = set()
-        if 'can' in pairs and isinstance(pairs['can'], list):
-            for pair in pairs['can']:
-                if isinstance(pair, list) and len(pair) == 2:
-                    a, b = pair
-                    can_pairs.add((a, b) if a <= b else (b, a))
-        if 'cannot' in pairs and isinstance(pairs['cannot'], list):
-            for pair in pairs['cannot']:
-                if isinstance(pair, list) and len(pair) == 2:
-                    a, b = pair
-                    cannot_pairs.add((a, b) if a <= b else (b, a))
-        if 'visual' in pairs and isinstance(pairs['visual'], list):
-            for pair in pairs['visual']:
-                if isinstance(pair, list) and len(pair) == 2:
-                    a, b = pair
-                    visual_pairs.add((a, b) if a <= b else (b, a))
-        pairs_series = get_pairs_vectorized(df)
-        mask_can = pairs_series.isin(list(can_pairs))
-        mask_cannot = pairs_series.isin(list(cannot_pairs))
-        mask_visual = pairs_series.isin(list(visual_pairs))
-        mask_unknown = ~(mask_can | mask_cannot | mask_visual)
-        df['cv_prediction'] = -1
-        df['cv_confidence'] = 0.5
-        df['prediction_source'] = 'algorithm'
-        df['cv_status'] = 'Reviewed'
-        df.loc[mask_can, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [0, 1.0, 'algorithm', 'Approved']
-        df.loc[mask_cannot, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [1, 1.0, 'algorithm', 'Active']
-        logger.info(f"[PROFILE] Алгоритмическая разметка: {time.perf_counter() - t_algo:.2f} сек")
-        print(f"[PROFILE] Алгоритмическая разметка: {time.perf_counter() - t_algo:.2f} сек")
-        # --- Поиск изображений ---
-        t_img = time.perf_counter()
-        need_images_mask = (df['cv_prediction'] == -1)
-        if need_images_mask.any():
-            df_need_images = df.loc[need_images_mask]
-            if 'image_href' in df_need_images.columns:
-                df.loc[need_images_mask, 'image_file'] = resolve_images_vectorized_series(df_need_images['image_href'], image_index, session_dir, parallel=True)
-                sample_paths = df.loc[need_images_mask, 'image_file'].dropna().head(3)
-                for i, path in enumerate(sample_paths):
-                    logger.info(f"Sample image path {i+1}: {path}")
-            else:
-                df.loc[need_images_mask, 'image_file'] = ''
-            df.loc[need_images_mask, :] = filter_valid_images(df.loc[need_images_mask, :])
-        logger.info(f"[PROFILE] Поиск изображений: {time.perf_counter() - t_img:.2f} сек")
-        print(f"[PROFILE] Поиск изображений: {time.perf_counter() - t_img:.2f} сек")
-        # --- Инференс модели ---
-        t_inf = time.perf_counter()
-        visual_mask = mask_visual | mask_unknown
-        if visual_mask.any():
-            if inference_mode == 'model':
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-                visual_df = df.loc[visual_mask].copy()
-                transform = create_transforms(is_training=False)
-                model_path = os.path.join('model', settings.get('model_file', 'model_clashmark.pt'))
-                def get_model_type_for_file(model_file):
-                    log_path = os.path.join('model', 'model_train_log.json')
-                    if model_file and os.path.exists(log_path):
-                        with open(log_path, 'r', encoding='utf-8') as f:
-                            logs = json.load(f)
-                        if isinstance(logs, dict):
-                            logs = [logs]
-                        for entry in logs:
-                            if entry.get('model_file') == model_file:
-                                return entry.get('model_type', 'mobilenet_v3_small')
-                    return 'mobilenet_v3_small'
-                model_type = get_model_type_for_file(settings.get('model_file', 'model_clashmark.pt'))
-                model = get_cached_model(device, model_path, model_type, True)
-                model.to(device)
-                model.eval()
-                visual_pred_df = predict(model, device, visual_df, transform, 
-                                       low_confidence_threshold=low_confidence, 
-                                       high_confidence_threshold=high_confidence,
-                                       session_dir=session_dir)
-                for i, idx in enumerate(visual_mask[visual_mask].index):
-                    prediction = int(visual_pred_df.iloc[i]['cv_prediction'])
-                    confidence = float(visual_pred_df.iloc[i]['cv_confidence'])
-                    if prediction == -1:
-                        df.at[idx, 'cv_prediction'] = -1
-                        df.at[idx, 'cv_confidence'] = confidence
-                        df.at[idx, 'prediction_source'] = 'model_uncertain'
-                        df.at[idx, 'cv_status'] = 'Reviewed'
-                    else:
-                        df.at[idx, 'cv_prediction'] = prediction
-                        df.at[idx, 'cv_confidence'] = confidence
-                        df.at[idx, 'prediction_source'] = 'model'
-                        df.at[idx, 'cv_status'] = 'Approved' if prediction == 0 else 'Active'
-            elif manual_review_enabled:
-                df.loc[visual_mask, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [-1, 0.5, 'manual_review', 'Reviewed']
-            else:
-                df.loc[visual_mask, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [-1, 0.5, 'algorithm', 'Reviewed']
-        logger.info(f"[PROFILE] Инференс модели: {time.perf_counter() - t_inf:.2f} сек")
-        print(f"[PROFILE] Инференс модели: {time.perf_counter() - t_inf:.2f} сек")
-        # --- Экспорт результатов ---
-        t_exp = time.perf_counter()
-        df_with_manual = apply_manual_review(df, session_dir)
-        # ... существующий код экспорта ...
-        logger.info(f"[PROFILE] Экспорт и финализация: {time.perf_counter() - t_exp:.2f} сек")
-        print(f"[PROFILE] Экспорт и финализация: {time.perf_counter() - t_exp:.2f} сек")
-        logger.info(f"[PROFILE] ВСЕГО: {time.perf_counter() - t_total:.2f} сек")
-        print(f"[PROFILE] ВСЕГО: {time.perf_counter() - t_total:.2f} сек")
-        # ... существующий код ...
-        
-        # Логируем статистику после применения ручной разметки
-        total_approved = int((df_with_manual['cv_prediction'] == 0).sum())
-        total_active = int((df_with_manual['cv_prediction'] == 1).sum())
-        total_reviewed = int((df_with_manual['cv_prediction'] == -1).sum())
-        
-        logger.info(f"Итоговая статистика после ручной разметки: Approved={total_approved}, Active={total_active}, Reviewed={total_reviewed}")
-        
-        # Логируем распределение по источникам разметки
-        manual_count = len(df_with_manual[df_with_manual['prediction_source'] == 'manual_review'])
-        algorithm_count = len(df_with_manual[df_with_manual['prediction_source'] == 'algorithm'])
-        model_count = len(df_with_manual[df_with_manual['prediction_source'] == 'model'])
-        model_uncertain_count = len(df_with_manual[df_with_manual['prediction_source'] == 'model_uncertain'])
-        
-        logger.info(f"Распределение по источникам: Manual={manual_count}, Algorithm={algorithm_count}, Model={model_count}, Model_Uncertain={model_uncertain_count}")
-        
-        # Экспорт и статистика только по df_with_manual
-        download_links = []
-        stats_per_file = []
-        
-        for i, (xml_path, orig_filename) in enumerate(xml_path_name_pairs):
-            orig_base_name = os.path.splitext(orig_filename)[0]
-            
-            if export_format == 'bimstep':
-                output_xml = os.path.join(session_dir, f"bimstep_results_{orig_base_name}.xml")
-            else:
-                output_xml = os.path.join(session_dir, f"cv_results_{orig_base_name}.xml")
-            
-            # Фильтруем данные по файлу из DataFrame с примененной ручной разметкой
-            df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
-            
-            if not df_file.empty:
-                # Логируем статистику перед экспортом
-                approved_count = (df_file['cv_prediction'] == 0).sum()
-                active_count = (df_file['cv_prediction'] == 1).sum()
-                reviewed_count = (df_file['cv_prediction'] == -1).sum()
-                logger.info(f"Экспорт {orig_filename}: Approved={approved_count}, Active={active_count}, Reviewed={reviewed_count}")
-                
-                # Логируем распределение по источникам разметки для этого файла
-                manual_count = len(df_file[df_file['prediction_source'] == 'manual_review'])
-                algorithm_count = len(df_file[df_file['prediction_source'] == 'algorithm'])
-                model_count = len(df_file[df_file['prediction_source'] == 'model'])
-                model_uncertain_count = len(df_file[df_file['prediction_source'] == 'model_uncertain'])
-                logger.info(f"Источники разметки для {orig_filename}: Manual={manual_count}, Algorithm={algorithm_count}, Model={model_count}, Model_Uncertain={model_uncertain_count}")
-                
-                # Экспортируем результаты с учетом ручной разметки
-                if export_format == 'bimstep':
-                    export_to_bimstep_xml(df_file, output_xml, xml_path)
-                    # Добавляем записи в журнал BIM Step
-                    for _, row in df_file.iterrows():
-                        if row.get('cv_prediction') is not None:
-                            prediction_source = row.get('prediction_source', '')
-                            if prediction_source == 'model':
-                                prediction_type = 'model'
-                            elif prediction_source == 'manual_review':
-                                prediction_type = 'manual'
-                            else:
-                                prediction_type = 'algorithm'
-                            
-                            # Определяем статус для журнала
-                            if row.get('cv_prediction') == 0:
-                                status = 'approved'
-                            elif row.get('cv_prediction') == 1:
-                                status = 'active'
-                            else:
-                                status = 'reviewed'
-                            
-                            journal_path = os.path.join(session_dir, 'JournalBimStep.xml')
-                            print('DEBUG: about to call add_bimstep_journal_entry', journal_path, type(journal_path))
-                            add_bimstep_journal_entry(
-                                row.get('clash_uid', ''), 
-                                prediction_type, 
-                                'Разметка с помощью ClashMark', 
-                                session_dir=session_dir,
-                                element1_id=row.get('element1_id', ''),
-                                element2_id=row.get('element2_id', ''),
-                                status=status
-                            )
-                else:
-                    export_to_xml(df_file, output_xml, xml_path)
-                
-                # Создаем ссылки для скачивания
-                # Для всех форматов используем исходное имя файла
-                download_filename = f"{orig_base_name}.xml"
-                
-                download_url = url_for('download_file', session_id=session_id, filename=os.path.basename(output_xml))
-                download_links.append({'name': download_filename, 'url': download_url})
-                
-                # Добавляем JournalBimStep.xml для BIM Step формата
-                if export_format == 'bimstep':
-                    journal_path = os.path.join(session_dir, 'JournalBimStep.xml')
-                    if os.path.exists(journal_path):
-                        journal_download_url = url_for('download_file', session_id=session_id, filename='JournalBimStep.xml')
-                        download_links.append({'name': 'JournalBimStep.xml', 'url': journal_download_url})
-                
-                # Итоговая статистика по файлу
-                total_collisions = len(df_file)
-                found_images = pd.Series(df_file['image_file']).notna().sum() if 'image_file' in df_file.columns else 0
-                approved_count = (df_file['cv_prediction'] == 0).sum()  # can -> Approved
-                active_count = (df_file['cv_prediction'] == 1).sum()    # cannot -> Active
-                reviewed_count = (df_file['cv_prediction'] == -1).sum()  # visual -> Reviewed
-                stats_per_file.append({
-                    'file': f'{orig_base_name}.xml',
-                    'total_collisions': total_collisions,
-                    'found_images': found_images,
-                    'approved_count': approved_count,
-                    'active_count': active_count,
-                    'reviewed_count': reviewed_count
-                })
-        # После формирования stats_per_file, добавляем stats_total для фронта
-        # Пересчитываем итоговую статистику с учетом ручной разметки
-        total_approved = (df_with_manual['cv_prediction'] == 0).sum()
-        total_active = (df_with_manual['cv_prediction'] == 1).sum()
-        total_reviewed = (df_with_manual['cv_prediction'] == -1).sum()
-        
-        stats_total = {
-            'total_files': len(stats_per_file),
-            'total_collisions': len(df_with_manual),
-            'total_approved': total_approved,
-            'total_active': total_active,
-            'total_reviewed': total_reviewed
+
+        # Инициализация прогресса
+        stages = [
+            {'key': 'algorithm', 'label': 'Разметка алгоритмом', 'enabled': True, 'status': 'pending'},
+            {'key': 'model', 'label': 'Разметка моделью', 'enabled': inference_mode == 'model', 'status': 'pending'},
+            {'key': 'manual', 'label': 'Ручная разметка', 'enabled': manual_review_enabled, 'status': 'pending'}
+        ]
+        analysis_progress[session_id] = {
+            'status': 'running',
+            'stage_statuses': [s for s in stages if s['enabled']]
         }
-        
-        # Логируем итоговую статистику
-        logger.info(f"Итоговая статистика для фронта: {stats_total}")
-        
-        # --- Детальная статистика по типам разметки ---
-        detailed_stats = []
-        for i, (xml_path, orig_filename) in enumerate(xml_path_name_pairs):
-            orig_base_name = os.path.splitext(orig_filename)[0]
-            
-            # Фильтруем данные по файлу из DataFrame с примененной ручной разметкой
-            df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
-            
-            if not df_file.empty:
-                # Корректно определяем источник и значение предсказания с учётом ручной разметки
-                pred_source = df_file['original_prediction_source'].combine_first(df_file['prediction_source']) if 'original_prediction_source' in df_file.columns else df_file['prediction_source']
-                pred_value = df_file['original_cv_prediction'].combine_first(df_file['cv_prediction']) if 'original_cv_prediction' in df_file.columns else df_file['cv_prediction']
-                # Статистика по алгоритму
-                algorithm_approved = int(((pred_source == 'algorithm') & (pred_value == 0)).sum())
-                algorithm_active = int(((pred_source == 'algorithm') & (pred_value == 1)).sum())
-                algorithm_reviewed = int(((pred_source == 'algorithm') & (pred_value == -1)).sum())
-                # Статистика по модели
-                model_mask = pred_source.isin(['model', 'model_uncertain'])
-                model_approved = int(((model_mask) & (pred_value == 0)).sum())
-                model_active = int(((model_mask) & (pred_value == 1)).sum())
-                model_reviewed = int(((model_mask) & (pred_value == -1)).sum())
-                # Статистика по ручной разметке
-                manual_approved = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 0)).sum())
-                manual_active = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == 1)).sum())
-                manual_reviewed = int(((df_file['prediction_source'] == 'manual_review') & (df_file['cv_prediction'] == -1)).sum())
-                
-                # value_counts по статусу
-                status_counts = df_file['cv_status'].value_counts().to_dict()
-                
-                detailed_stats.append({
-                    'file_name': orig_filename,
-                    'total_collisions': len(df_file),
-                    'algorithm': {
-                        'approved': algorithm_approved,
-                        'active': algorithm_active,
-                        'reviewed': algorithm_reviewed
-                    },
-                    'model': {
-                        'approved': model_approved,
-                        'active': model_active,
-                        'reviewed': model_reviewed
-                    },
-                    'manual': {
-                        'approved': manual_approved,
-                        'active': manual_active,
-                        'reviewed': manual_reviewed
-                    },
-                    'status_counts': status_counts
-                })
-                
-                # Логируем детальную статистику для этого файла
-                logger.info(f"Детальная статистика для {orig_filename}: Algorithm(A={algorithm_approved},Ac={algorithm_active},R={algorithm_reviewed}), Model(A={model_approved},Ac={model_active},R={model_reviewed}), Manual(A={manual_approved},Ac={manual_active},R={manual_reviewed})")
-        
-        # --- Новый блок: формируем список для ручной разметки ---
-        manual_review_collisions = []
-        if manual_review_enabled:
-            # Используем исходный DataFrame для формирования списка ручной разметки
-            # Нужно найти коллизии с cv_prediction == -1 (которые требуют ручной разметки)
-            for _, row in df.iterrows():
-                if row.get('cv_prediction') == -1:
-                    image_path = row.get('image_file', '')
-                    # Получаем относительный путь от session_dir, если image_path абсолютный
-                    if image_path and image_path.startswith(session_dir):
-                        rel_image_path = os.path.relpath(image_path, session_dir)
-                    elif image_path:
-                        # Если путь не начинается с session_dir, извлекаем только имя файла
-                        # и предполагаем, что он находится в BSImages
-                        filename = os.path.basename(image_path)
-                        if filename:
-                            rel_image_path = os.path.join('BSImages', filename)
-                        else:
-                            rel_image_path = ''
-                    else:
-                        rel_image_path = ''
-                    # Логгируем для отладки
-                    logger.info(f"MANUAL_REVIEW: clash_uid={row.get('clash_uid', '')}, image_file={rel_image_path}")
-                    manual_review_collisions.append({
-                        'clash_uid': row.get('clash_uid', ''),
-                        'image_file': rel_image_path,
-                        'element1_category': row.get('element1_category', ''),
-                        'element2_category': row.get('element2_category', ''),
-                        'description': row.get('clash_name', ''),
-                        'source_file': row.get('source_file', ''),
-                        'session_id': session_id
-                    })
-            logger.info(f"Сформирован список для ручной разметки: {len(manual_review_collisions)} коллизий")
-        else:
-            logger.info("Ручная разметка отключена в настройках")
-        
-        # --- Формируем статусы этапов анализа для фронта ---
-        stage_statuses = []
-        # Этап 1: алгоритм всегда есть
-        stage_statuses.append({'key': 'algorithm', 'status': 'done'})
-        # Этап 2: модель (только оптимизированный инференс)
-        if inference_mode == 'model':
-            stage_statuses.append({'key': 'model', 'status': 'done'})
-        # Этап 3: ручная разметка
-        if manual_review_enabled:
-            stage_statuses.append({'key': 'manual', 'status': 'done'})
-        print('BEFORE RESPONSE_DATA', time.perf_counter())
-        response_data = {
-            'success': True,
-            'session_id': session_id,
-            'download_links': download_links,
-            'stats_per_file': stats_per_file,
-            'stats_total': stats_total,
-            'used_images': export_format == 'standard',
-            'analysis_settings': analysis_settings,
-            'manual_review_collisions': manual_review_collisions,
-            'detailed_stats': detailed_stats,
-            'stage_statuses': stage_statuses
-        }
-        print('AFTER RESPONSE_DATA', time.perf_counter())
-        print('BEFORE CSV', time.perf_counter())
-        csv_path = os.path.join(session_dir, 'df_with_inference.csv')
-        try:
-            df_with_manual.to_csv(csv_path, index=False, encoding='utf-8')
-        except Exception as e:
-            logger.warning(f"[analyze_files] Ошибка сохранения CSV: {e}")
-            try:
-                # Альтернативный способ сохранения
-                temp_csv_path = os.path.join(session_dir, 'df_with_inference_temp.csv')
-                df_with_manual.to_csv(temp_csv_path, index=False, encoding='utf-8')
-                if os.path.exists(csv_path):
-                    os.remove(csv_path)
-                os.rename(temp_csv_path, csv_path)
-            except Exception as e2:
-                logger.error(f"[analyze_files] Не удалось сохранить CSV: {e2}")
-        print('AFTER CSV', time.perf_counter())
-        print('BEFORE JSONIFY', time.perf_counter())
-        print('END ANALYZE', time.perf_counter())
-        print('BEFORE RETURN', time.perf_counter())
-        return jsonify(to_py(response_data))
-        
+
+        # Запуск фоновой задачи
+        thread = threading.Thread(target=run_analysis_background, args=(
+            session_id, session_dir, xml_path_name_pairs, zip_paths, settings
+        ))
+        thread.start()
+
+        return jsonify({'success': True, 'session_id': session_id})
+
     except Exception as e:
-        print('END ANALYZE', time.perf_counter())
-        logger.error(f"Ошибка анализа файлов: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({'error': f'Ошибка анализа: {str(e)}'})
+        logger.error(f"Ошибка при запуске анализа: {e}", exc_info=True)
+        return jsonify({'error': f'Ошибка запуска анализа: {str(e)}'})
 
 @app.route('/api/analyze_preview', methods=['POST'])
 def analyze_preview():
@@ -1040,8 +863,8 @@ def api_manual_review():
             orig_base_name = os.path.splitext(orig_filename)[0]
             df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
             if not df_file.empty:
-                if export_format == 'bimstep':
-                    output_xml = os.path.join(session_dir, f"bimstep_results_{orig_base_name}.xml")
+                if export_format == 'bimstep' or export_format == 'standard':
+                    output_xml = os.path.join(session_dir, f"{orig_base_name}.xml")
                     export_to_bimstep_xml(df_file, output_xml, orig_xml)
                 else:
                     output_xml = os.path.join(session_dir, f"cv_results_{orig_base_name}.xml")
@@ -1051,12 +874,12 @@ def api_manual_review():
                 # Для всех форматов используем исходное имя файла
                 download_filename = f"{orig_base_name}.xml"
                 
-                download_url = url_for('download_file', session_id=session_id, filename=os.path.basename(output_xml))
+                download_url = f"/download/{session_id}/{urllib.parse.quote(os.path.basename(output_xml))}"
                 download_links.append({'name': download_filename, 'url': download_url})
-                if export_format == 'bimstep':
+                if export_format == 'bimstep' or export_format == 'standard':
                     journal_path = os.path.join(session_dir, 'JournalBimStep.xml')
                     if os.path.exists(journal_path):
-                        journal_download_url = url_for('download_file', session_id=session_id, filename='JournalBimStep.xml')
+                        journal_download_url = f"/download/{session_id}/JournalBimStep.xml"
                         download_links.append({'name': 'JournalBimStep.xml', 'url': journal_download_url})
         # detailed_stats
         detailed_stats = []
@@ -1243,21 +1066,21 @@ def api_updated_stats(session_id):
             orig_base_name = os.path.splitext(orig_filename)[0]
             df_file = df_with_manual[df_with_manual['source_file'] == orig_filename].copy()
             if not df_file.empty:
-                if export_format == 'bimstep':
-                    output_xml = os.path.join(session_dir, f"bimstep_results_{orig_base_name}.xml")
+                if export_format == 'bimstep' or export_format == 'standard':
+                    output_xml = os.path.join(session_dir, f"{orig_base_name}.xml")
                     export_to_bimstep_xml(df_file, output_xml, orig_xml)
                 else:
                     output_xml = os.path.join(session_dir, f"cv_results_{orig_base_name}.xml")
                     export_to_xml(df_file, output_xml, orig_xml)
                 logger.info(f"Переэкспортирован файл {orig_filename} с учетом ручной разметки")
                 # --- формируем ссылку для скачивания ---
-                download_url = url_for('download_file', session_id=session_id, filename=os.path.basename(output_xml))
+                download_url = f"/download/{session_id}/{urllib.parse.quote(os.path.basename(output_xml))}"
                 download_links.append({'name': os.path.basename(output_xml), 'url': download_url})
                 # Для BIM Step добавляем JournalBimStep.xml
-                if export_format == 'bimstep':
+                if export_format == 'bimstep' or export_format == 'standard':
                     journal_path = os.path.join(session_dir, 'JournalBimStep.xml')
                     if os.path.exists(journal_path):
-                        journal_download_url = url_for('download_file', session_id=session_id, filename='JournalBimStep.xml')
+                        journal_download_url = f"/download/{session_id}/JournalBimStep.xml"
                         download_links.append({'name': 'JournalBimStep.xml', 'url': journal_download_url})
         # --- Конец блока ---
         # Перезаписываем df_with_inference.csv актуальным DataFrame с ручной разметкой
@@ -1297,52 +1120,25 @@ def download_file(session_id, filename):
             logger.debug(f"DOWNLOAD: session_dir not found or does not exist")
             return "Файл не найден", 404
         
-        # Декодируем URL-encoded путь
-        import urllib.parse
         decoded_filename = urllib.parse.unquote(filename)
         
-        # Проверяем, является ли путь абсолютным (начинается с /)
-        if decoded_filename.startswith('/'):
-            # Это абсолютный путь, проверяем, находится ли он в session_dir
-            if not decoded_filename.startswith(session_dir):
-                # На macOS файлы могут быть в /private/var/folders/, но URL содержит /var/folders/
-                if decoded_filename.startswith('/var/folders/') and session_dir.startswith('/private/var/folders/'):
-                    # Преобразуем путь для macOS
-                    macos_path = '/private' + decoded_filename
-                    if os.path.exists(macos_path):
-                        logger.debug(f"DOWNLOAD: found macOS path: {macos_path}")
-                        return send_file(macos_path, as_attachment=True, download_name=os.path.basename(macos_path))
-                
-                # Если путь содержит старую сессию, попробуем найти файл в текущей сессии
-                if 'analysis_session_' in decoded_filename:
-                    # Извлекаем имя файла и ищем его в текущей сессии
-                    filename_only = os.path.basename(decoded_filename)
-                    if filename_only:
-                        # Ищем в BSImages
-                        bsimages_path = os.path.join(session_dir, 'BSImages', filename_only)
-                        if os.path.exists(bsimages_path):
-                            logger.debug(f"DOWNLOAD: found in BSImages: {bsimages_path}")
-                            return send_file(bsimages_path, as_attachment=True, download_name=filename_only)
-                        # Ищем в корне сессии
-                        root_path = os.path.join(session_dir, filename_only)
-                        if os.path.exists(root_path):
-                            logger.debug(f"DOWNLOAD: found in root: {root_path}")
-                            return send_file(root_path, as_attachment=True, download_name=filename_only)
-                
-                logger.debug(f"DOWNLOAD: absolute path outside session_dir: {decoded_filename}")
-                return "Доступ запрещен", 403
-            file_path = decoded_filename
-        else:
-            # Обычный относительный путь
-            file_path = os.path.join(session_dir, decoded_filename)
+        # Ищем файл рекурсивно в директории сессии
+        file_path = None
+        for root, dirs, files in os.walk(session_dir):
+            if decoded_filename in files:
+                file_path = os.path.join(root, decoded_filename)
+                break
         
-        logger.debug(f"DOWNLOAD: file_path={file_path}")
-        
-        if not os.path.exists(file_path):
-            logger.debug(f"DOWNLOAD: file_path does not exist: {file_path}")
+        if not file_path:
+            logger.debug(f"DOWNLOAD: file '{decoded_filename}' not found anywhere in '{session_dir}'")
             return "Файл не найден", 404
-        logger.debug(f"DOWNLOAD: sending file {file_path}")
-        return send_file(file_path, as_attachment=True, download_name=os.path.basename(file_path))
+
+        image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg'}
+        _, ext = os.path.splitext(decoded_filename)
+        as_attachment = ext.lower() not in image_extensions
+
+        logger.debug(f"DOWNLOAD: sending file {file_path}, as_attachment={as_attachment}")
+        return send_file(file_path, as_attachment=as_attachment, download_name=os.path.basename(file_path))
     except Exception as e:
         logger.error(f"Ошибка скачивания файла: {e}")
         return "Ошибка скачивания", 500

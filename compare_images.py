@@ -17,11 +17,4 @@ for clash in root.iter('imagePath'):
 
 missing = needed_files - actual_files
 
-print(f'Всего требуется файлов: {len(needed_files)}')
-print(f'Найдено в папке: {len(actual_files)}')
-print(f'Отсутствуют {len(missing)} файла(ов):')
-for i, f in enumerate(sorted(missing)):
-    print(f'  {f}')
-    if i > 19:
-        print('  ...')
-        break 
+# Удалить все print(...). 

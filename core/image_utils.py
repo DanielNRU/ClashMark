@@ -4,6 +4,7 @@ import logging
 import hashlib
 import pickle
 from pathlib import Path
+import pandas as pd
 
 def normalize_filename(name):
     name = name.strip().lower()
@@ -20,13 +21,25 @@ def get_relative_image_path(image_href):
     """
     if not image_href:
         return ''
-    clean_path = image_href.replace('\\', '/').strip()
-    parts = clean_path.split('/')
-    if len(parts) >= 2:
-        return os.path.join(parts[-2], parts[-1])
-    elif len(parts) == 1:
-        return parts[0]
-    return ''
+    try:
+        if pd.isna(image_href):
+            return ''
+        image_href = str(image_href)
+        clean_path = image_href.replace('\\', '/').strip()
+        parts = clean_path.split('/')
+        # Если путь содержит BSImages, берем всё после него
+        for i, part in enumerate(parts):
+            if part.lower() == 'bsimages':
+                return os.path.join(*parts[i:])
+        # Если BSImages не найден, берем последние две части
+        if len(parts) >= 2:
+            return os.path.join(parts[-2], parts[-1])
+        elif len(parts) == 1:
+            return parts[0]
+        return ''
+    except Exception as e:
+        logging.error(f"Error in get_relative_image_path: {str(e)}")
+        return ''
 
 def get_absolute_image_path_optimized(image_href, session_dir):
     """
@@ -35,40 +48,25 @@ def get_absolute_image_path_optimized(image_href, session_dir):
     """
     if not image_href or not session_dir:
         return None
-    
-    # Нормализуем путь
-    rel_path = image_href.replace('\\', '/').strip()
-    
-    # Ищем BSImages в пути
-    bsimages_idx = rel_path.find('/BSImages/')
-    if bsimages_idx == -1:
-        bsimages_idx = rel_path.find('BSImages/')
-    
-    if bsimages_idx != -1:
-        # Извлекаем часть пути начиная с BSImages
-        rel_path = rel_path[bsimages_idx:].lstrip('/')
-        abs_path = os.path.join(session_dir, rel_path)
-        
-        # Проверяем существование файла
-        if os.path.exists(abs_path):
-            return abs_path
-    
-    # Fallback: если не нашли BSImages или файл не существует, 
-    # извлекаем только имя файла и ищем по нему
-    filename = os.path.basename(rel_path)
-    if filename:
-        # Ищем в папке BSImages
-        bsimages_path = os.path.join(session_dir, 'BSImages', filename)
-        if os.path.exists(bsimages_path):
-            return bsimages_path
-        
-        # Ищем в корне session_dir
-        root_path = os.path.join(session_dir, filename)
-        if os.path.exists(root_path):
-            return root_path
-    
-    return None
-
+    try:
+        if pd.isna(image_href):
+            return None
+        image_href = str(image_href)
+        rel_path = get_relative_image_path(image_href)
+        if not rel_path:
+            return None
+        paths_to_try = [
+            os.path.join(session_dir, rel_path),  # Полный относительный путь
+            os.path.join(session_dir, 'BSImages', os.path.basename(rel_path)),  # В папке BSImages
+            os.path.join(session_dir, os.path.basename(rel_path))  # В корне session_dir
+        ]
+        for path in paths_to_try:
+            if os.path.exists(path):
+                return path
+        return None
+    except Exception as e:
+        logging.error(f"Error in get_absolute_image_path_optimized: {str(e)}")
+        return None
 
 def find_image_by_name(image_href, session_dir):
     """
@@ -76,25 +74,31 @@ def find_image_by_name(image_href, session_dir):
     если не найдено — ищет по имени файла во всех подпапках session_dir.
     """
     import logging
+    logger = logging.getLogger(__name__)
     if not image_href or not session_dir:
-        logging.warning(f"[find_image_by_name] Нет image_href или session_dir: {image_href}, {session_dir}")
+        logger.warning(f"[find_image_by_name] Нет image_href или session_dir: {image_href}, {session_dir}")
         return None
-    rel_path = get_relative_image_path(image_href)
-    abs_path = os.path.join(session_dir, rel_path)
-    if os.path.exists(abs_path):
-        logging.debug(f"[find_image_by_name] Найдено по относительному пути: {abs_path}")
-        return abs_path
-    # Fallback: ищем по имени файла во всех подпапках
-    filename = os.path.basename(rel_path)
-    filename_norm = normalize_filename(filename)
-    for root, dirs, files in os.walk(session_dir):
-        for file in files:
-            if normalize_filename(file) == filename_norm:
-                candidate = os.path.join(root, file)
-                logging.debug(f"[find_image_by_name] Найдено по имени: {candidate}")
-                return candidate
-    logging.warning(f"[find_image_by_name] Не найдено: {rel_path} (session_dir={session_dir})")
-    return None 
+    try:
+        if pd.isna(image_href):
+            return None
+        image_href = str(image_href)
+        # Сначала пробуем оптимизированный поиск
+        optimized_result = get_absolute_image_path_optimized(image_href, session_dir)
+        if optimized_result:
+            return optimized_result
+        # Если не нашли, ищем по имени файла во всех подпапках
+        filename = os.path.basename(image_href)
+        for root, dirs, files in os.walk(session_dir):
+            for file in files:
+                if file == filename:  # Точное совпадение
+                    candidate = os.path.join(root, file)
+                    logger.debug(f"[find_image_by_name] Найдено по точному имени: {candidate}")
+                    return candidate
+        logger.warning(f"[find_image_by_name] Не найдено: {filename} (session_dir={session_dir})")
+        return None
+    except Exception as e:
+        logger.error(f"Error in find_image_by_name: {str(e)}")
+        return None
 
 def build_image_index(session_dir, exts=(".jpg", ".jpeg", ".png", ".bmp")):
     index = {}

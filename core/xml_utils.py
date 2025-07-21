@@ -1,6 +1,6 @@
+import os
 import pandas as pd
 import xml.etree.ElementTree as ET
-import os
 import logging
 from datetime import datetime
 import numpy as np
@@ -103,7 +103,7 @@ def parse_xml_data(xml_path, export_format='standard'):
             clash['status'] = clash_result.get('status', '')
             clash['distance'] = float(clash_result.get('distance', 0))
             image_href = clash_result.get('href', '')
-            clash['image_href'] = image_href.replace('\\', '/').strip() if image_href else ''
+            clash['image_href'] = os.path.basename(image_href.replace('\\', '/').strip()) if image_href else ''
             cp = clash_result.find('.//clashpoint/pos3f')
             clash['clash_x'] = float(cp.get('x', 0)) if cp is not None and cp.get('x', None) is not None else 0
             clash['clash_y'] = float(cp.get('y', 0)) if cp is not None and cp.get('y', None) is not None else 0
@@ -345,7 +345,6 @@ def export_to_bimstep_xml(df, output_xml_path, original_xml_path=None):
 
 def add_bimstep_journal_entry(clash_uid, prediction_type, comment, session_dir=None, element1_id=None, element2_id=None, status=None):
     """Добавляет запись в журнал BIM Step с ID объектов и статусом"""
-    print('DEBUG: add_bimstep_journal_entry called')
     try:
         if session_dir:
             # Создаем журнал во временной папке сессии
@@ -435,17 +434,6 @@ def add_bimstep_journal_entry(clash_uid, prediction_type, comment, session_dir=N
             acc_comment.text = 'Коллизия разрешена'
         
         # Сохраняем журнал
-        debug_log_path = '/tmp/journal_debug.log'
-        try:
-            with open(debug_log_path, 'a', encoding='utf-8') as dbg:
-                dbg.write(f'journal_path: {journal_path}, type: {type(journal_path)}\n')
-        except Exception as e:
-            try:
-                with open(debug_log_path, 'a', encoding='utf-8') as dbg:
-                    dbg.write(f'error writing debug log: {e}\n')
-            except Exception:
-                pass
-        # Создаём директорию, если её нет
         os.makedirs(os.path.dirname(journal_path), exist_ok=True)
         # Если файла нет, создаём новый XML-документ
         if not os.path.exists(journal_path):

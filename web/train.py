@@ -160,10 +160,6 @@ def handle_train_request():
                 df_visual_aug = pd.concat([df_visual, pd.DataFrame(augmented_rows)], ignore_index=True) if augmented_rows else df_visual
                 if not isinstance(df_visual_aug, pd.DataFrame):
                     df_visual_aug = pd.DataFrame(df_visual_aug)
-                print(f"[DEBUG] Размер датасета после аугментации: {len(df_visual_aug)}")
-                print("[DEBUG] Распределение классов:", df_visual_aug['label'].value_counts().to_dict() if 'label' in df_visual_aug.columns else {})
-                if 'IsResolved' in df_visual_aug.columns:
-                    df_visual_aug = df_visual_aug.drop(columns=['IsResolved'])
                 df_final = df_visual_aug.rename(columns={'label': 'IsResolved'})
                 # --- Конец нового блока ---
 
@@ -192,7 +188,6 @@ def handle_train_request():
                 
                 # Запускаем обучение с callback для прогресса
                 def progress_callback(epoch, batch, total_batches, train_loss, val_loss, val_acc, f1, recall, precision=None, update_metrics=True):
-                    print(f"[PROGRESS_CALLBACK] epoch={epoch}, batch={batch}, update_metrics={update_metrics}")
                     prog = load_train_progress(temp_dir)
                     # Всегда обновляем текущий батч и эпоху
                     prog['started'] = True
@@ -202,7 +197,6 @@ def handle_train_request():
                     prog['loss'] = round(float(train_loss), 3)
                     # Метрики и лог — только если update_metrics=True (раз в эпоху)
                     if update_metrics:
-                        print(f"[PROGRESS_CALLBACK] >>> ДОБАВЛЯЕМ МЕТРИКИ В МАССИВЫ: epoch={epoch}, train_loss={train_loss}, val_loss={val_loss}, val_acc={val_acc}, f1={f1}, recall={recall}, precision={precision}")
                         metrics = prog.setdefault('metrics', {})
                         for key, val in [
                             ('train_losses', train_loss),
@@ -215,7 +209,7 @@ def handle_train_request():
                             arr = metrics.setdefault(key, [])
                             arr.append(val if val is not None else 0)
                     else:
-                        print(f"[PROGRESS_CALLBACK] --- НЕ добавляем метрики в массивы: только статус")
+                        pass # --- НЕ добавляем метрики в массивы: только статус ---
                     update_train_progress(prog, temp_dir)
                 model_name = f"model_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pt"
                 metrics = train_model(

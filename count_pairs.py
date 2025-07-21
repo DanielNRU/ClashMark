@@ -22,9 +22,5 @@ for label, csv_path in csv_files:
     try:
         df = pd.read_csv(csv_path)
     except Exception as e:
-        print(f'Файл {csv_path} не найден или не читается: {e}')
         continue
-    print(f'\nФайл: {csv_path}')
-    visual_df = df[df.apply(lambda row: (row['element1_category'], row['element2_category']) in visual_pairs, axis=1)]
-    print('Распределение статусов среди visual-пар:')
-    print(visual_df['status'].value_counts()) 
+    visual_df = df[df.apply(lambda row: (row['element1_category'], row['element2_category']) in visual_pairs, axis=1)] 

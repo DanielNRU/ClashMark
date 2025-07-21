@@ -340,69 +340,154 @@ if (searchInput) {
 function updateAnalysisInfoFromSettings(settings) {
     window.lastExportFormat = settings.export_format;
     window.lastModelFile = settings.model_file || '';
-    setAnalysisStagesFromSettings(settings);
+    window.lastModelTypePretty = settings.model_type_pretty || '';
 }
 
 // --- Этапы анализа: отображение статусов ---
 const STAGE_ICONS = {
-    pending: '',
-    in_progress: '<span class="spinner-inline"></span>',
-    done: '✅'
+    'pending': '⚪',  // Ожидание
+    'in_progress': '⌛', // В процессе
+    'done': '✅'      // Завершено
 };
 
-function renderAnalysisStages(stages, exportFormat, modelFile) {
+function renderAnalysisStages(stages, exportFormat) {
     const container = document.getElementById('analysisStages');
     if (!container) return;
     let html = '';
     stages.forEach(stage => {
         if (!stage.enabled) return;
-        let icon = '';
-        if (stage.status === 'in_progress') {
-            icon = '<span class="spinner-inline"></span>';
-        } else if (stage.status === 'done') {
-            icon = '✅';
-        } else {
-            icon = '';
+        const icon = STAGE_ICONS[stage.status] || '⚪';
+        let label = stage.label;
+
+        if (stage.key === 'model') {
+            let modelInfo = '';
+            const modelName = window.lastModelFile || '';
+            const modelArch = window.lastModelTypePretty || '';
+            if (modelName) {
+                 // Используем память для форматирования имени архитектуры [[memory:3779313]]
+                const prettyArch = modelArch.replace(/_/g, ' ');
+                modelInfo = `: ${modelName} (архитектура: ${prettyArch})`;
+            }
+            label += modelInfo;
         }
+
         html += `<div style="margin-bottom:4px;display:flex;align-items:center;gap:8px;">
-            <span style=\"color:#23408e;font-weight:600;\">${icon}</span>
-            <span style=\"color:#23408e;font-weight:500;\">${stage.label}</span>
+            <span style="color:#23408e;font-weight:600;min-width:18px;display:inline-block;">${icon}</span>
+            <span style="color:#23408e;font-weight:500;">${label}</span>
         </div>`;
     });
     // Итоговая строка
     let formatStr = exportFormat === 'bimstep' ? 'BIM Step' : 'стандартный';
-    let modelStr = modelFile ? `, <br>Выбрана модель: ${modelFile}` : '';
-    html += `<div style=\"margin-top:10px;color:#666;font-size:14px;\">Формат экспорта: ${formatStr}${modelStr}</div>`;
+    html += `<div style="margin-top:10px;color:#666;font-size:14px;">Формат экспорта: ${formatStr}</div>`;
     container.innerHTML = html;
-    // Добавляем CSS для spinner-inline
-    if (!document.getElementById('spinner-inline-style')) {
-        const style = document.createElement('style');
-        style.id = 'spinner-inline-style';
-        style.innerHTML = `.spinner-inline { display:inline-block;width:16px;height:16px;border:2px solid #e3e3e3;border-radius:50%;border-top-color:#23408e;animation:spin 1s linear infinite;vertical-align:middle;margin-right:2px;}
-        @keyframes spin { to { transform: rotate(360deg); } }`;
-        document.head.appendChild(style);
-    }
 }
 
 // --- Управление этапами анализа ---
 let currentAnalysisStages = [];
+let analysisPollingInterval = null;
+
 function setAnalysisStagesFromSettings(settings) {
     currentAnalysisStages = [
         { key: 'algorithm', label: 'Разметка алгоритмом', enabled: true, status: 'pending' },
         { key: 'model', label: 'Разметка моделью компьютерного зрения', enabled: settings.inference_mode === 'model' || settings.inference_mode === 'hybrid', status: 'pending' },
         { key: 'manual', label: 'Ручная разметка', enabled: settings.manual_review_enabled, status: 'pending' }
     ];
-    renderAnalysisStages(currentAnalysisStages, settings.export_format, settings.model_file);
 }
+
 function updateStageStatus(key, status) {
     const stage = currentAnalysisStages.find(s => s.key === key);
-    if (stage) stage.status = status;
-    renderAnalysisStages(currentAnalysisStages, window.lastExportFormat, window.lastModelFile);
+    if (stage && stage.enabled) {
+        stage.status = status;
+    }
+}
+
+function pollAnalysisProgress(sessionId) {
+    analysisPollingInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/analysis_progress/${sessionId}`);
+            if (!response.ok) {
+                // Если сессия больше не найдена, прекращаем опрос
+                if (response.status === 404) {
+                    clearInterval(analysisPollingInterval);
+                    analysisPollingInterval = null;
+                }
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+
+            // Обновляем статусы этапов
+            if (data.stage_statuses) {
+                currentAnalysisStages = data.stage_statuses;
+                renderAnalysisStages(currentAnalysisStages, window.lastExportFormat);
+            }
+
+            // Проверяем завершение
+            if (data.status === 'finished') {
+                clearInterval(analysisPollingInterval);
+                analysisPollingInterval = null;
+                
+                const finalResult = data.result;
+                if (finalResult.success) {
+                    // Отображаем финальную статистику и ссылки
+                    const statsContainer = document.getElementById('statsContainer');
+                    const stats = finalResult.stats_total || {};
+                    let statsHtml = `<div class="stats-grid">
+                        <div class="stat-item"><div class="stat-label">Файлов</div><div class="stat-value">${stats.total_files ?? '-'}</div></div>
+                        <div class="stat-item"><div class="stat-label">Всего коллизий</div><div class="stat-value">${stats.total_collisions ?? '-'}</div></div>
+                        <div class="stat-item"><div class="stat-label">Approved</div><div class="stat-value">${stats.total_approved ?? '-'}</div></div>
+                        <div class="stat-item"><div class="stat-label">Active</div><div class="stat-value">${stats.total_active ?? '-'}</div></div>
+                        <div class="stat-item"><div class="stat-label">Reviewed</div><div class="stat-value">${stats.total_reviewed ?? '-'}</div></div>
+                    </div>`;
+                    statsContainer.innerHTML = statsHtml;
+
+                    const downloadContainer = document.getElementById('downloadContainer');
+                    let downloadHtml = '<h4>📥 Скачать результаты:</h4><div class="download-links">';
+                    finalResult.download_links.forEach(link => {
+                        downloadHtml += `<a href="${link.url}" class="download-link"><span class="file-name">${link.name}</span><span class="download-icon">⬇️</span></a>`;
+                    });
+                    downloadHtml += '</div>';
+                    downloadContainer.innerHTML = downloadHtml;
+
+                    if (finalResult.detailed_stats) {
+                        renderDetailedAnalysis(finalResult.detailed_stats, {});
+                    }
+                    
+                    // Если есть ручная разметка, показываем модальное окно
+                    if (finalResult.manual_review_collisions && finalResult.manual_review_collisions.length > 0) {
+                        showManualReviewModal(finalResult.manual_review_collisions);
+                    } else {
+                        // Иначе скрываем загрузчик и показываем результаты
+                        document.getElementById('loadingIndicator').style.display = 'none';
+                        document.getElementById('results').style.display = 'block';
+                    }
+                } else {
+                    document.getElementById('errorContainer').innerHTML = `<span class="icon">⚠️</span> ${finalResult.error || 'Неизвестная ошибка анализа'}`;
+                    document.getElementById('errorContainer').style.display = 'block';
+                    document.getElementById('loadingIndicator').style.display = 'none';
+                }
+            } else if (data.status === 'error') {
+                clearInterval(analysisPollingInterval);
+                analysisPollingInterval = null;
+                document.getElementById('errorContainer').innerHTML = `<span class="icon">⚠️</span> ${data.error || 'Ошибка на сервере'}`;
+                document.getElementById('errorContainer').style.display = 'block';
+                document.getElementById('loadingIndicator').style.display = 'none';
+            }
+        } catch (error) {
+            console.error('Ошибка опроса прогресса анализа:', error);
+            clearInterval(analysisPollingInterval);
+            analysisPollingInterval = null;
+             document.getElementById('loadingIndicator').style.display = 'none';
+             document.getElementById('errorContainer').innerHTML = `<span class="icon">⚠️</span> Ошибка связи с сервером.`;
+             document.getElementById('errorContainer').style.display = 'block';
+        }
+    }, 2500);
 }
 
 document.addEventListener('DOMContentLoaded', function() {
     fetch('/api/settings').then(r => r.json()).then(settings => {
         updateAnalysisInfoFromSettings(settings);
+        setAnalysisStagesFromSettings(settings);
+        renderAnalysisStages(currentAnalysisStages, settings.export_format);
     });
     // ... существующий код ...
     const finishBtn = document.getElementById('manualReviewFinishBtn');
@@ -460,8 +545,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     alert('Ошибка сохранения разметки: ' + e.message);
                 });
             } else {
-                alert('Ручная разметка завершена! (session_id не найден или нет результатов)');
+                 if (!sessionId) {
+                    alert('Ручная разметка завершена, но не удалось найти ID сессии для сохранения.');
+                } else if (manualReviewResults.length === 0) {
+                    // Do nothing, just close.
+                } else {
+                    alert('Нет данных для сохранения.');
+                }
             }
+            // После завершения ручной разметки скрываем блок загрузки
+             document.getElementById('loadingIndicator').style.display = 'none';
+             document.getElementById('results').style.display = 'block';
         };
     }
     if (continueBtn) {
@@ -518,7 +612,7 @@ function showManualReviewModal(collisions) {
     manualReviewQueue = collisions;
     manualReviewIndex = 0;
     manualReviewResults = [];
-    manualReviewStatuses = new Array(collisions.length).fill(null); // Сброс статусов
+    manualReviewStatuses = new Array(collisions.length).fill(null);
     if (manualReviewQueue.length > 0) {
         renderManualReviewItem();
         document.getElementById('manualReviewModal').style.display = 'flex';
@@ -528,36 +622,44 @@ function showManualReviewModal(collisions) {
 function renderManualReviewItem() {
     const item = manualReviewQueue[manualReviewIndex];
     if (!item) return closeManualReview();
+    
     // Картинка
     const img = document.getElementById('manualReviewImage');
-    if (item.image_file) {
-        if (item.session_id && item.image_file) {
-            img.src = `/download/${item.session_id}/${encodeURIComponent(item.image_file)}`;
-        } else if (item.image_file.startsWith('http')) {
-            img.src = item.image_file;
+    const imageFile = item.image_file || '';
+    
+    if (imageFile) {
+        // Извлекаем только имя файла из полного пути
+        const imageName = imageFile.split(/[\\/]/).pop();
+        if (item.session_id && imageName) {
+            img.src = `/download/${item.session_id}/${encodeURIComponent(imageName)}`;
         } else {
-            img.src = item.image_file;
+            // Fallback для случаев, когда нет сессии или имени файла
+            img.src = imageFile; 
         }
         img.style.display = '';
     } else {
         img.src = '';
         img.style.display = 'none';
     }
-    // Счётчик (например, 4/35)
+    
+    // Счётчик
     const counter = document.getElementById('manualReviewCounter');
     if (counter) {
         counter.textContent = `${manualReviewIndex + 1} / ${manualReviewQueue.length}`;
     }
+    
     // Кнопки навигации
     const prevBtn = document.getElementById('manualReviewPrev');
     const nextBtn = document.getElementById('manualReviewNext');
     if (prevBtn) prevBtn.disabled = manualReviewIndex === 0;
     if (nextBtn) nextBtn.disabled = manualReviewIndex === manualReviewQueue.length - 1;
+    
     // Инфо
     document.getElementById('manualReviewInfo').innerHTML =
         `<b>Категории:</b><br><div>${item.element1_category}</div><div>${item.element2_category}</div>` +
         (item.description ? `<br><b>Описание:</b> ${item.description}` : '');
-    // --- Новое: выделение выбранной кнопки ---
+    
+    // Выделение выбранной кнопки
     const status = manualReviewStatuses[manualReviewIndex];
     const btnApprove = document.getElementById('btnApprove');
     const btnActive = document.getElementById('btnActive');
@@ -679,80 +781,77 @@ document.getElementById('analyzeForm').addEventListener('submit', async function
     const loadingIndicator = document.getElementById('loadingIndicator');
     const results = document.getElementById('results');
     const errorContainer = document.getElementById('errorContainer');
-    let analysisInfo = document.getElementById('analysisInfo');
-    // Показываем индикатор загрузки
+    
+    if (analysisPollingInterval) {
+        clearInterval(analysisPollingInterval);
+        analysisPollingInterval = null;
+    }
+
     analyzeBtn.disabled = true;
     analyzeBtn.innerHTML = 'Анализ выполняется...';
     loadingIndicator.style.display = 'block';
     results.style.display = 'none';
     errorContainer.style.display = 'none';
     
-    // Очищаем детальный анализ
     const detailedAnalysis = document.getElementById('detailedAnalysis');
     if (detailedAnalysis) {
         detailedAnalysis.innerHTML = '';
     }
-    // analysisInfo обновляется из настроек до анализа не требуется, т.к. уже обновлено при загрузке
-    // --- Новый блок: сбрасываем статусы этапов ---
-    let firstActive = true;
-    currentAnalysisStages.forEach(s => {
-        if (s.enabled) {
-            if (firstActive) {
-                s.status = 'in_progress';
-                firstActive = false;
-            } else {
-                s.status = 'pending';
-            }
-        } else {
-            s.status = '';
+    
+    try {
+        const settingsResponse = await fetch('/api/settings');
+        const settings = await settingsResponse.json();
+        updateAnalysisInfoFromSettings(settings);
+        setAnalysisStagesFromSettings(settings);
+
+        let firstEnabledStage = currentAnalysisStages.find(s => s.enabled);
+        if (firstEnabledStage) {
+            firstEnabledStage.status = 'in_progress';
         }
-    });
-    renderAnalysisStages(currentAnalysisStages, window.lastExportFormat, window.lastModelFile);
+        renderAnalysisStages(currentAnalysisStages, window.lastExportFormat);
+
+    } catch (error) {
+        console.error("Ошибка при получении настроек перед анализом:", error);
+        errorContainer.innerHTML = `<span class="icon">⚠️</span> Ошибка при загрузке настроек: ${error.message}`;
+        errorContainer.style.display = 'block';
+        loadingIndicator.style.display = 'none';
+        analyzeBtn.disabled = false;
+        analyzeBtn.innerHTML = '🔍 Начать анализ';
+        return;
+    }
+
+    /*
+    // Очистка кеша перед анализом
+    try {
+        await fetch('/settings', { 
+            method: 'POST', 
+            body: new URLSearchParams({ action: 'clear_cache' }) 
+        });
+    } catch (error) {
+        console.warn("Не удалось очистить кеш перед анализом:", error);
+    }
+    */
+
+    // --- Запуск анализа ---
+    // Теперь мы не ожидаем полного ответа, а только session_id
     try {
         const response = await fetch('/analyze', {
             method: 'POST',
             body: formData
         });
         const data = await response.json();
-        // --- Новый блок: отображаем настройки анализа ---
-        if (data.analysis_settings) {
-            updateAnalysisInfoFromSettings(data.analysis_settings);
-        }
-        // --- Новый блок: обновляем статусы этапов по ходу анализа ---
-        if (data.stage_statuses) {
-            data.stage_statuses.forEach(({key, status}) => updateStageStatus(key, status));
+        
+        if (data.success && data.session_id) {
+            window.lastSessionId = data.session_id;
+            pollAnalysisProgress(data.session_id); // Запускаем опрос
         } else {
-            currentAnalysisStages.forEach(s => { if (s.enabled) s.status = 'done'; });
-            renderAnalysisStages(currentAnalysisStages, window.lastExportFormat, window.lastModelFile);
-        }
-        if (data.error) {
-            errorContainer.innerHTML = `<span class="icon">⚠️</span> ${data.error}`;
-            errorContainer.style.display = 'block';
-        } else {
-            // ... остальной код ...
-            if (data.session_id) window.lastSessionId = data.session_id;
-            if (data.manual_review_collisions && Array.isArray(data.manual_review_collisions) && data.manual_review_collisions.length > 0) {
-                showManualReviewModal(data.manual_review_collisions);
-            }
-            
-            // Отображаем детальный анализ
-            if (data.detailed_stats && Array.isArray(data.detailed_stats)) {
-                renderDetailedAnalysis(data.detailed_stats, data.analysis_settings);
-            } else {
-                // Скрываем спойлер, если нет данных
-                const detailedAnalysis = document.getElementById('detailedAnalysis');
-                if (detailedAnalysis) {
-                    detailedAnalysis.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">Нет данных для детального анализа</div>';
-                }
-            }
+            throw new Error(data.error || "Не удалось запустить анализ.");
         }
     } catch (error) {
-        errorContainer.innerHTML = `<span class="icon">⚠️</span> Ошибка сети: ${error.message}`;
+        errorContainer.innerHTML = `<span class="icon">⚠️</span> ${error.message}`;
         errorContainer.style.display = 'block';
-    } finally {
-        // Скрываем индикатор загрузки
+        loadingIndicator.style.display = 'none';
         analyzeBtn.disabled = false;
         analyzeBtn.innerHTML = '🔍 Начать анализ';
-        loadingIndicator.style.display = 'none';
     }
 });

@@ -37,16 +37,6 @@ class CollisionImageDataset(Dataset):
         # Диагностика: если после фильтрации пусто — выбрасываем ошибку
         if len(self.dataframe) == 0:
             raise ValueError(f"Не найдено валидных изображений для обучения!\nВременная папка: {session_dir}")
-        # Выводим первые 10 меток для диагностики
-        label_col = None
-        for col in ['IsResolved', 'label', 'status']:
-            if col in self.dataframe.columns:
-                label_col = col
-                break
-        if label_col:
-            print(f"[DEBUG][CollisionImageDataset] Первые 10 меток ({label_col}):", self.dataframe[label_col].head(10).tolist())
-        else:
-            print("[DEBUG][CollisionImageDataset] Нет ни одной колонки с метками (IsResolved, label, status)!")
         logger.info(f"Загружено {len(self.dataframe)} изображений для обучения")
     
     def __len__(self):

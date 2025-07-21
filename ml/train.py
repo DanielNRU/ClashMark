@@ -24,7 +24,6 @@ def collect_dataset_from_multiple_files(xml_paths, images_dir=None, export_forma
             continue
         # Гарантируем, что df — DataFrame
         if not isinstance(df, pd.DataFrame):
-            print(f"[DEBUG] Преобразую df в DataFrame после parse_xml_data, type(df)={type(df)}")
             df = pd.DataFrame(df)
         def find_image_optimized(href):
             if not href:
@@ -43,17 +42,14 @@ def collect_dataset_from_multiple_files(xml_paths, images_dir=None, export_forma
     combined_df = pd.concat(all_dataframes, ignore_index=True)
     # Гарантируем, что combined_df — DataFrame
     if not isinstance(combined_df, pd.DataFrame):
-        print(f"[DEBUG] Преобразую combined_df в DataFrame после concat, type(combined_df)={type(combined_df)}")
         combined_df = pd.DataFrame(combined_df)
     df_with_images = combined_df[combined_df['image_file'].notna() & combined_df['image_file'].apply(lambda x: x is not None)]
     if not isinstance(df_with_images, pd.DataFrame):
-        print(f"[DEBUG] Преобразую df_with_images в DataFrame после фильтрации, type(df_with_images)={type(df_with_images)}")
         df_with_images = pd.DataFrame(df_with_images)
     # Оставляем только классы 0 и 1
     if 'IsResolved' in df_with_images.columns:
         df_with_images = df_with_images[df_with_images['IsResolved'].isin([0, 1])].copy()
         if not isinstance(df_with_images, pd.DataFrame):
-            print(f"[DEBUG] Преобразую df_with_images в DataFrame после фильтрации IsResolved, type(df_with_images)={type(df_with_images)}")
             df_with_images = pd.DataFrame(df_with_images)
     # --- Логирование распределения классов ---
     import logging
@@ -61,10 +57,8 @@ def collect_dataset_from_multiple_files(xml_paths, images_dir=None, export_forma
     if isinstance(df_with_images, pd.DataFrame) and 'IsResolved' in df_with_images.columns:
         class_counts = df_with_images['IsResolved'].value_counts().to_dict()
     else:
-        print(f"[DEBUG] df_with_images не DataFrame или нет колонки IsResolved, type(df_with_images)={type(df_with_images)}")
         class_counts = {}
     logger.info(f"Распределение классов после фильтрации: {class_counts}")
-    print(f"[DEBUG] Распределение классов после фильтрации: {class_counts}")
     return df_with_images
 
 def create_transforms(is_training=True):
@@ -119,13 +113,13 @@ def train_model(df, epochs=10, batch_size=16, learning_rate=1e-4, device=None, p
     )
     # --- Вывод распределения классов ---
     if isinstance(train_df, pd.DataFrame) and 'IsResolved' in train_df.columns:
-        print(f"[DEBUG] Train class distribution: {train_df['IsResolved'].value_counts().to_dict()}")
+        print(f"Train class distribution: {train_df['IsResolved'].value_counts().to_dict()}")
     else:
-        print(f"[DEBUG] train_df не DataFrame или нет колонки IsResolved, type(train_df)={type(train_df)}")
+        print(f"train_df не DataFrame или нет колонки IsResolved, type(train_df)={type(train_df)}")
     if isinstance(val_df, pd.DataFrame) and 'IsResolved' in val_df.columns:
-        print(f"[DEBUG] Val class distribution: {val_df['IsResolved'].value_counts().to_dict()}")
+        print(f"Val class distribution: {val_df['IsResolved'].value_counts().to_dict()}")
     else:
-        print(f"[DEBUG] val_df не DataFrame или нет колонки IsResolved, type(val_df)={type(val_df)}")
+        print(f"val_df не DataFrame или нет колонки IsResolved, type(val_df)={type(val_df)}")
     
     model = create_model(device, model_type)
     transform = create_transforms(is_training=True)
@@ -144,7 +138,7 @@ def train_model(df, epochs=10, batch_size=16, learning_rate=1e-4, device=None, p
         pos_weight = torch.tensor([n_neg / n_pos], dtype=torch.float32, device=device)
     else:
         pos_weight = torch.tensor([1.0], dtype=torch.float32, device=device)
-    print(f"[DEBUG] pos_weight для BCEWithLogitsLoss: {pos_weight.item():.3f}")
+    print(f"pos_weight для BCEWithLogitsLoss: {pos_weight.item():.3f}")
     criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     
@@ -164,7 +158,6 @@ def train_model(df, epochs=10, batch_size=16, learning_rate=1e-4, device=None, p
         all_train_predictions = []
         all_train_labels = []
         for i, (images, labels) in enumerate(train_dataloader):
-            print(f"[DEBUG][EPOCH {epoch+1}][BATCH {i+1}] images.shape: {images.shape}, labels: {labels[:5]}")
             images = images.to(device)
             labels = labels.to(device).unsqueeze(1)
             optimizer.zero_grad()
@@ -177,7 +170,6 @@ def train_model(df, epochs=10, batch_size=16, learning_rate=1e-4, device=None, p
             all_train_predictions.extend(predictions.detach().cpu().numpy().tolist())
             all_train_labels.extend(labels.detach().cpu().numpy().flatten().tolist())
             if progress_callback:
-                print(f"[CALL][progress_callback] epoch={epoch}, batch={i}, update_metrics=False")
                 try:
                     progress_callback(
                         epoch, i, len(train_dataloader), running_loss / (i + 1), None, None, None, None, None,
@@ -195,10 +187,8 @@ def train_model(df, epochs=10, batch_size=16, learning_rate=1e-4, device=None, p
             train_precision = precision_score(all_train_labels, all_train_predictions, zero_division=0)
             try:
                 train_conf_matrix = confusion_matrix(all_train_labels, all_train_predictions)
-                print(f"[EPOCH {epoch+1}] confusion_matrix={train_conf_matrix.tolist()}")
             except Exception as e:
                 train_conf_matrix = None
-                print(f"[EPOCH {epoch+1}] Ошибка при вычислении confusion_matrix по train: {e}")
         else:
             print(f"[EPOCH {epoch+1}] Нет данных или только один класс для подсчёта метрик по train")
             train_accuracy = None
@@ -229,10 +219,8 @@ def train_model(df, epochs=10, batch_size=16, learning_rate=1e-4, device=None, p
             val_precision = precision_score(val_targets, val_preds, zero_division=0)
             try:
                 val_conf_matrix = confusion_matrix(val_targets, val_preds)
-                print(f"[EPOCH {epoch+1}] val_confusion_matrix={val_conf_matrix.tolist()}")
             except Exception as e:
                 val_conf_matrix = None
-                print(f"[EPOCH {epoch+1}] Ошибка при вычислении confusion_matrix по val: {e}")
         else:
             print(f"[EPOCH {epoch+1}] Нет данных или только один класс для подсчёта метрик по val")
             val_accuracy = None
@@ -242,7 +230,6 @@ def train_model(df, epochs=10, batch_size=16, learning_rate=1e-4, device=None, p
             val_conf_matrix = None
         # Вызов progress_callback только после валидации (раз в эпоху)
         if progress_callback:
-            print(f"[CALL][progress_callback] epoch={epoch}, batch={len(train_dataloader)-1}, update_metrics=True")
             try:
                 progress_callback(
                     epoch, len(train_dataloader)-1, len(train_dataloader), running_loss / len(train_dataloader),

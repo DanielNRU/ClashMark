@@ -40,5 +40,26 @@
     "epochs": 5,
     "batch_size": 16,
     "model_type": "ResNet 18"
+  },
+  {
+    "train_time": "2025-07-21T21:00:20.060972",
+    "model_file": "model_20250721_205107.pt",
+    "final_accuracy": 0.9921259842519685,
+    "final_f1": 0.992,
+    "final_recall": 0.9841269841269841,
+    "final_precision": 1.0,
+    "confusion_matrix": [
+      [
+        64,
+        0
+      ],
+      [
+        1,
+        62
+      ]
+    ],
+    "epochs": 10,
+    "batch_size": 16,
+    "model_type": "ResNet 18"
   }
 ]
