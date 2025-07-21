@@ -345,6 +345,7 @@ def export_to_bimstep_xml(df, output_xml_path, original_xml_path=None):
 
 def add_bimstep_journal_entry(clash_uid, prediction_type, comment, session_dir=None, element1_id=None, element2_id=None, status=None):
     """Добавляет запись в журнал BIM Step с ID объектов и статусом"""
+    print('DEBUG: add_bimstep_journal_entry called')
     try:
         if session_dir:
             # Создаем журнал во временной папке сессии
@@ -434,6 +435,27 @@ def add_bimstep_journal_entry(clash_uid, prediction_type, comment, session_dir=N
             acc_comment.text = 'Коллизия разрешена'
         
         # Сохраняем журнал
+        debug_log_path = '/tmp/journal_debug.log'
+        try:
+            with open(debug_log_path, 'a', encoding='utf-8') as dbg:
+                dbg.write(f'journal_path: {journal_path}, type: {type(journal_path)}\n')
+        except Exception as e:
+            try:
+                with open(debug_log_path, 'a', encoding='utf-8') as dbg:
+                    dbg.write(f'error writing debug log: {e}\n')
+            except Exception:
+                pass
+        # Создаём директорию, если её нет
+        os.makedirs(os.path.dirname(journal_path), exist_ok=True)
+        # Если файла нет, создаём новый XML-документ
+        if not os.path.exists(journal_path):
+            root = ET.Element('Journal')
+            tree = ET.ElementTree(root)
+        else:
+            tree = ET.parse(journal_path)
+        # Перед записью удаляем файл, если он существует
+        if os.path.exists(journal_path):
+            os.remove(journal_path)
         tree.write(journal_path, encoding='utf-8', xml_declaration=True)
         
         logger.info(f"Добавлена запись в журнал BIM Step для коллизии {clash_uid}")

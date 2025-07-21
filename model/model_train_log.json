@@ -21,24 +21,24 @@
     "model_type": "MobileNetV3 Small"
   },
   {
-    "train_time": "2025-07-20T14:50:39.748355",
-    "model_file": "model_20250720_144828.pt",
-    "final_accuracy": 0.9448818897637795,
-    "final_f1": 0.9411764705882353,
-    "final_recall": 0.8888888888888888,
-    "final_precision": 1.0,
+    "train_time": "2025-07-20T15:02:50.614188",
+    "model_file": "model_20250720_145836.pt",
+    "final_accuracy": 0.9921259842519685,
+    "final_f1": 0.9921259842519685,
+    "final_recall": 1.0,
+    "final_precision": 0.984375,
     "confusion_matrix": [
       [
-        64,
-        0
+        63,
+        1
       ],
       [
-        7,
-        56
+        0,
+        63
       ]
     ],
     "epochs": 5,
     "batch_size": 16,
-    "model_type": "MobileNetV3 Small"
+    "model_type": "ResNet 18"
   }
 ]

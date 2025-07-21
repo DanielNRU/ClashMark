@@ -141,7 +141,13 @@ def find_image_by_name_optimized(image_href, image_index):
     filename = os.path.basename(get_relative_image_path(image_href)).lower()
     return image_index.get(filename)
 
-def resolve_images_vectorized_series(image_hrefs, image_index, images_dir):
+def resolve_images_vectorized_series(image_hrefs, image_index, images_dir, parallel=True):
+    """
+    Векторизованный и параллельный поиск изображений по href с использованием индекса.
+    Если parallel=True, поиск выполняется в несколько потоков.
+    """
+    import pandas as pd
+    from concurrent.futures import ThreadPoolExecutor
     def resolve_one(href):
         if not href:
             return ''
@@ -151,4 +157,8 @@ def resolve_images_vectorized_series(image_hrefs, image_index, images_dir):
             return abs_path
         image_name = os.path.basename(href)
         return image_index.get(image_name.lower(), '')
-    return image_hrefs.map(resolve_one) 
+    if parallel:
+        with ThreadPoolExecutor() as executor:
+            return pd.Series(list(executor.map(resolve_one, image_hrefs)), index=image_hrefs.index)
+    else:
+        return image_hrefs.map(resolve_one) 

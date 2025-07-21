@@ -12,11 +12,14 @@ import uuid
 import threading
 import urllib.parse
 import glob
+import pickle
+from concurrent.futures import ThreadPoolExecutor
+import time
 
 from core.xml_utils import (
     load_all_category_pairs, get_pair, parse_xml_data, export_to_bimstep_xml, export_to_xml, add_bimstep_journal_entry
 )
-from core.image_utils import find_image_by_name, get_relative_image_path, get_absolute_image_path_optimized
+from core.image_utils import find_image_by_name, get_relative_image_path, get_absolute_image_path_optimized, build_image_index_with_cache
 from ml.model import create_model
 from ml.dataset import CollisionImageDataset, create_transforms
 from ml.inference import predict, fill_xml_fields
@@ -285,20 +288,46 @@ def settings():
 @app.route('/api/settings', methods=['GET'])
 def api_settings():
     settings = load_settings()
-    return jsonify(settings)
+    return jsonify(to_py(settings))
+
+def get_or_build_image_index(session_dir):
+    """
+    Кэширует индекс изображений в session_dir/image_index.pkl
+    """
+    cache_path = os.path.join(session_dir, 'image_index.pkl')
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, 'rb') as f:
+                return pickle.load(f)
+        except Exception:
+            pass
+    index = build_image_index_with_cache(session_dir)
+    try:
+        with open(cache_path, 'wb') as f:
+            pickle.dump(index, f)
+    except Exception:
+        pass
+    return index
 
 @app.route('/analyze', methods=['POST'])
 def analyze_files():
+    print('TYPE OF time:', type(time))
+    print('START ANALYZE', time.perf_counter())
     try:
         import pandas as pd
         import torch
-        import time
         from core.image_utils import build_image_index_with_cache, resolve_images_vectorized_series
         from core.xml_utils import get_pairs_vectorized, filter_valid_images
         from ml.model import get_cached_model, create_model, get_model_info
         from ml.dataset import create_transforms
+        t_total = time.perf_counter()
+        t0 = time.perf_counter()
+        # --- Загрузка файлов ---
         xml_files = request.files.getlist('xml_file')
         zip_files = request.files.getlist('images_zip')
+        logger.info(f"[PROFILE] Загрузка файлов: {time.perf_counter() - t0:.2f} сек")
+        print(f"[PROFILE] Загрузка файлов: {time.perf_counter() - t0:.2f} сек")
+        t0 = time.perf_counter()
         settings = load_settings()
         export_format = settings.get('export_format', 'standard')
         inference_mode = settings.get('inference_mode', 'model')
@@ -313,22 +342,13 @@ def analyze_files():
             'model_type': settings.get('model_type', 'mobilenet_v3_small')
         }
         if not xml_files:
+            print('END ANALYZE', time.perf_counter())
             return jsonify({'error': 'Не выбраны XML файлы!', 'analysis_settings': analysis_settings})
         if export_format == 'standard' and not zip_files:
+            print('END ANALYZE', time.perf_counter())
             return jsonify({'error': 'Для стандартного формата необходимо загрузить ZIP архивы с изображениями!', 'analysis_settings': analysis_settings})
-        
-        # Очищаем старые сессии (оставляем только последние 5)
-        if len(session_dirs) > 5:
-            old_sessions = list(session_dirs.keys())[:-5]
-            for old_session_id in old_sessions:
-                old_session_dir = session_dirs.pop(old_session_id, None)
-                if old_session_dir and os.path.exists(old_session_dir):
-                    try:
-                        shutil.rmtree(old_session_dir)
-                        logger.info(f"Очищена старая сессия: {old_session_id}")
-                    except Exception as e:
-                        logger.warning(f"Не удалось очистить сессию {old_session_id}: {e}")
-        
+        # --- Распаковка файлов ---
+        t_unpack = time.perf_counter()
         session_dir = tempfile.mkdtemp(prefix='analysis_session_')
         session_id = os.path.basename(session_dir)
         session_dirs[session_id] = session_dir
@@ -355,21 +375,33 @@ def analyze_files():
             for zip_path in zip_paths:
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                     zip_ref.extractall(session_dir)
-        # Оптимизированная часть: индекс изображений
-        t1 = time.perf_counter()
-        image_index = build_image_index_with_cache(session_dir)
-        logger.info(f"[TIME] Индексация изображений: {time.perf_counter() - t1:.2f} сек")
-        df = []
-        for xml_path, safe_filename in xml_path_name_pairs:
+        logger.info(f"[PROFILE] Распаковка файлов: {time.perf_counter() - t_unpack:.2f} сек")
+        print(f"[PROFILE] Распаковка файлов: {time.perf_counter() - t_unpack:.2f} сек")
+        # --- Индексация изображений ---
+        t_index = time.perf_counter()
+        image_index = get_or_build_image_index(session_dir)
+        logger.info(f"[PROFILE] Индексация изображений: {time.perf_counter() - t_index:.2f} сек")
+        print(f"[PROFILE] Индексация изображений: {time.perf_counter() - t_index:.2f} сек")
+        # --- Парсинг XML (параллельно) ---
+        t_parse = time.perf_counter()
+        def parse_one(args):
+            xml_path, safe_filename = args
             df_part = parse_xml_data(xml_path, export_format=export_format)
             if len(df_part) == 0:
-                continue
+                return None
             df_part['source_file'] = safe_filename
-            df.append(df_part)
-        if not df:
+            return df_part
+        with ThreadPoolExecutor() as executor:
+            dfs = list(executor.map(parse_one, xml_path_name_pairs))
+        dfs = [df for df in dfs if df is not None]
+        if not dfs:
+            print('END ANALYZE', time.perf_counter())
             return jsonify({'error': 'Не удалось обработать XML файлы!', 'analysis_settings': analysis_settings})
-        df = pd.concat(df, ignore_index=True)
-        # Алгоритмическая разметка
+        df = pd.concat(dfs, ignore_index=True)
+        logger.info(f"[PROFILE] Парсинг XML: {time.perf_counter() - t_parse:.2f} сек")
+        print(f"[PROFILE] Парсинг XML: {time.perf_counter() - t_parse:.2f} сек")
+        # --- Алгоритмическая разметка ---
+        t_algo = time.perf_counter()
         pairs = load_all_category_pairs('category_pairs.yaml')
         can_pairs = set()
         cannot_pairs = set()
@@ -400,22 +432,25 @@ def analyze_files():
         df['cv_status'] = 'Reviewed'
         df.loc[mask_can, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [0, 1.0, 'algorithm', 'Approved']
         df.loc[mask_cannot, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [1, 1.0, 'algorithm', 'Active']
-        # Только теперь вычисляем image_file для нужных строк
+        logger.info(f"[PROFILE] Алгоритмическая разметка: {time.perf_counter() - t_algo:.2f} сек")
+        print(f"[PROFILE] Алгоритмическая разметка: {time.perf_counter() - t_algo:.2f} сек")
+        # --- Поиск изображений ---
+        t_img = time.perf_counter()
         need_images_mask = (df['cv_prediction'] == -1)
         if need_images_mask.any():
-            df_need_images = df.loc[need_images_mask].copy()
+            df_need_images = df.loc[need_images_mask]
             if 'image_href' in df_need_images.columns:
-                df.loc[need_images_mask, 'image_file'] = resolve_images_vectorized_series(df_need_images['image_href'], image_index, session_dir)
-                # Логируем несколько примеров путей к изображениям для отладки
+                df.loc[need_images_mask, 'image_file'] = resolve_images_vectorized_series(df_need_images['image_href'], image_index, session_dir, parallel=True)
                 sample_paths = df.loc[need_images_mask, 'image_file'].dropna().head(3)
                 for i, path in enumerate(sample_paths):
                     logger.info(f"Sample image path {i+1}: {path}")
             else:
                 df.loc[need_images_mask, 'image_file'] = ''
             df.loc[need_images_mask, :] = filter_valid_images(df.loc[need_images_mask, :])
-        if df.empty:
-            return jsonify({'error': 'Не удалось обработать XML файлы!', 'analysis_settings': analysis_settings})
-        # Повторная загрузка пар не требуется
+        logger.info(f"[PROFILE] Поиск изображений: {time.perf_counter() - t_img:.2f} сек")
+        print(f"[PROFILE] Поиск изображений: {time.perf_counter() - t_img:.2f} сек")
+        # --- Инференс модели ---
+        t_inf = time.perf_counter()
         visual_mask = mask_visual | mask_unknown
         if visual_mask.any():
             if inference_mode == 'model':
@@ -423,7 +458,6 @@ def analyze_files():
                 visual_df = df.loc[visual_mask].copy()
                 transform = create_transforms(is_training=False)
                 model_path = os.path.join('model', settings.get('model_file', 'model_clashmark.pt'))
-                # --- Получаем архитектуру модели по выбранному файлу ---
                 def get_model_type_for_file(model_file):
                     log_path = os.path.join('model', 'model_train_log.json')
                     if model_file and os.path.exists(log_path):
@@ -460,8 +494,18 @@ def analyze_files():
                 df.loc[visual_mask, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [-1, 0.5, 'manual_review', 'Reviewed']
             else:
                 df.loc[visual_mask, ['cv_prediction', 'cv_confidence', 'prediction_source', 'cv_status']] = [-1, 0.5, 'algorithm', 'Reviewed']
+        logger.info(f"[PROFILE] Инференс модели: {time.perf_counter() - t_inf:.2f} сек")
+        print(f"[PROFILE] Инференс модели: {time.perf_counter() - t_inf:.2f} сек")
+        # --- Экспорт результатов ---
+        t_exp = time.perf_counter()
         df_with_manual = apply_manual_review(df, session_dir)
-        # --- Все дальнейшие действия (экспорт, статистика) только по df_with_manual ---
+        # ... существующий код экспорта ...
+        logger.info(f"[PROFILE] Экспорт и финализация: {time.perf_counter() - t_exp:.2f} сек")
+        print(f"[PROFILE] Экспорт и финализация: {time.perf_counter() - t_exp:.2f} сек")
+        logger.info(f"[PROFILE] ВСЕГО: {time.perf_counter() - t_total:.2f} сек")
+        print(f"[PROFILE] ВСЕГО: {time.perf_counter() - t_total:.2f} сек")
+        # ... существующий код ...
+        
         # Логируем статистику после применения ручной разметки
         total_approved = int((df_with_manual['cv_prediction'] == 0).sum())
         total_active = int((df_with_manual['cv_prediction'] == 1).sum())
@@ -528,6 +572,8 @@ def analyze_files():
                             else:
                                 status = 'reviewed'
                             
+                            journal_path = os.path.join(session_dir, 'JournalBimStep.xml')
+                            print('DEBUG: about to call add_bimstep_journal_entry', journal_path, type(journal_path))
                             add_bimstep_journal_entry(
                                 row.get('clash_uid', ''), 
                                 prediction_type, 
@@ -684,6 +730,7 @@ def analyze_files():
         # Этап 3: ручная разметка
         if manual_review_enabled:
             stage_statuses.append({'key': 'manual', 'status': 'done'})
+        print('BEFORE RESPONSE_DATA', time.perf_counter())
         response_data = {
             'success': True,
             'session_id': session_id,
@@ -696,10 +743,8 @@ def analyze_files():
             'detailed_stats': detailed_stats,
             'stage_statuses': stage_statuses
         }
-        
-        logger.info(f"Отправляем ответ с {len(download_links)} ссылками для скачивания и {len(detailed_stats)} детальными статистиками")
-        logger.info(f"Итоговая статистика в ответе: {stats_total}")
-        # --- В analyze_files (после формирования df_with_manual и перед return) ---
+        print('AFTER RESPONSE_DATA', time.perf_counter())
+        print('BEFORE CSV', time.perf_counter())
         csv_path = os.path.join(session_dir, 'df_with_inference.csv')
         try:
             df_with_manual.to_csv(csv_path, index=False, encoding='utf-8')
@@ -714,10 +759,14 @@ def analyze_files():
                 os.rename(temp_csv_path, csv_path)
             except Exception as e2:
                 logger.error(f"[analyze_files] Не удалось сохранить CSV: {e2}")
-        
+        print('AFTER CSV', time.perf_counter())
+        print('BEFORE JSONIFY', time.perf_counter())
+        print('END ANALYZE', time.perf_counter())
+        print('BEFORE RETURN', time.perf_counter())
         return jsonify(to_py(response_data))
         
     except Exception as e:
+        print('END ANALYZE', time.perf_counter())
         logger.error(f"Ошибка анализа файлов: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
@@ -1231,7 +1280,7 @@ def api_updated_stats(session_id):
         logger.info(f"Детальная статистика содержит {len(detailed_stats)} файлов")
         # --- добавляем download_links в ответ ---
         full_response['download_links'] = download_links
-        return jsonify(full_response)
+        return jsonify(to_py(full_response))
     except Exception as e:
         logger.error(f"Ошибка в api_updated_stats: {e}")
         import traceback
@@ -1531,7 +1580,9 @@ def api_train():
                 }
             })
             update_train_progress(prog, session_dir)
-        def train_job():
+        model_type = request.form.get('model_type', 'mobilenet_v3_small')
+        pretty_model_type = prettify_model_type(model_type)
+        def train_job(model_type, pretty_model_type):
             try:
                 # Убеждаемся, что df_visual содержит необходимые колонки
                 if 'IsResolved' not in df_visual.columns:
@@ -1547,15 +1598,11 @@ def api_train():
                     else:
                         update_train_progress({'status': 'error', 'log': 'Не найдена колонка IsResolved, status или resultstatus для обучения'}, session_dir)
                         return
-                
                 # Фильтруем только нужные классы
                 df_visual_filtered = df_visual[df_visual['IsResolved'].isin([0, 1])].copy()
                 if len(df_visual_filtered) == 0:
                     update_train_progress({'status': 'error', 'log': 'Не найдено данных для обучения (требуются классы 0 и 1)'}, session_dir)
                     return
-                
-                model_type = request.form.get('model_type', 'mobilenet_v3_small')
-                pretty_model_type = prettify_model_type(model_type)
                 metrics = train_model(df_visual_filtered, epochs=epochs, batch_size=batch_size, progress_callback=progress_callback, model_filename=model_name, model_type=model_type)
                 if metrics is None:
                     update_train_progress({'status': 'error', 'log': 'Обучение не запущено: в обучающей выборке только один класс!'}, session_dir)
@@ -1592,8 +1639,9 @@ def api_train():
                 if os.path.exists(log_path):
                     with open(log_path, 'r', encoding='utf-8') as f:
                         logs = json.load(f)
-                    if not isinstance(logs, list):
+                    if isinstance(logs, dict):
                         logs = [logs]
+                    logs = [entry for entry in logs if entry.get('model_file') != model_name]
                 else:
                     logs = []
                 logs.append(log_entry)
@@ -1607,7 +1655,7 @@ def api_train():
             except Exception as e:
                 logger.error(f"Ошибка обучения: {e}")
                 update_train_progress({'status': 'error', 'log': f'Ошибка обучения: {str(e)}'}, session_dir)
-        train_thread = threading.Thread(target=train_job)
+        train_thread = threading.Thread(target=train_job, args=(model_type, pretty_model_type))
         train_thread.start()
         return jsonify({'success': True})
     except Exception as e:
@@ -1619,7 +1667,7 @@ def api_train_progress():
     global last_train_temp_dir
     if not last_train_temp_dir:
         return jsonify({'status': 'not_started', 'message': 'Обучение ещё не запускалось'}), 200
-    return jsonify(load_train_progress(last_train_temp_dir))
+    return jsonify(to_py(load_train_progress(last_train_temp_dir)))
 
 @app.route('/cleanup_session', methods=['POST'])
 def cleanup_session():
@@ -1676,4 +1724,4 @@ def prettify_model_type(model_type):
     return mapping.get(model_type, model_type.replace('_', ' '))
 
 if __name__ == '__main__':
-    app.run(debug=True) 
+    app.run(debug=True, threaded=False) 
