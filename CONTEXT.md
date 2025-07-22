@@ -109,3 +109,12 @@ visual:
 - Основной разработчик: Daniil Melnik
 - Документация: README.md, CONTEXT.md
 - Вопросы: issues на GitHub 
+
+---
+
+## Контейнеризация (Docker)
+
+- ClashMark поддерживает развёртывание через Docker (Dockerfile и docker-compose.yaml в корне).
+- Для обмена файлами модели используется volume: папка model/ на хосте монтируется в /app/model внутри контейнера.
+- Запуск: docker build -t clashmark . && docker run -p 5001:5001 -v $(pwd)/model:/app/model clashmark
+- Или через docker-compose up --build 

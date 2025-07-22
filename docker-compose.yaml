@@ -1,0 +1,8 @@
+version: '3.8'
+services:
+  clashmark:
+    image: danielnru/clashmark:latest
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./model:/app/model

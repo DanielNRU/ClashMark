@@ -41,6 +41,25 @@
    ```
 3. Откройте [http://127.0.0.1:8000](http://127.0.0.1:8000) (или [http://localhost:5001](http://localhost:5001) для Flask) в браузере.
 
+### Docker (Linux/Mac/Windows)
+
+1. Соберите образ:
+   ```bash
+   docker build -t clashmark .
+   ```
+2. Запустите контейнер с volume для моделей:
+   ```bash
+   docker run -p 5001:5001 -v $(pwd)/model:/app/model clashmark
+   ```
+   Или через docker-compose:
+   ```bash
+   docker-compose up --build
+   ```
+3. Откройте [http://localhost:5001](http://localhost:5001) в браузере.
+
+- Все файлы, которые вы кладёте в папку `model/` на вашей машине, будут доступны внутри контейнера по пути `/app/model`.
+- Для обновления модели просто замените файл в папке `model/` — контейнер увидит изменения.
+
 ---
 
 ## 2. Обзор интерфейса
