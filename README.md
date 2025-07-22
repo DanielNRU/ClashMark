@@ -1,6 +1,6 @@
 # 🚦 ClashMark — Веб-приложение для анализа коллизий BIM-моделей
 
-[![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/) [![Flask](https://img.shields.io/badge/flask-2.0%2B-black)](https://flask.palletsprojects.com/) [![PyTorch](https://img.shields.io/badge/pytorch-1.9%2B-red)](https://pytorch.org/) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/) [![Flask](https://img.shields.io/badge/flask-2.0%2B-black)](https://flask.palletsprojects.com/) [![PyTorch](https://img.shields.io/badge/pytorch-1.9%2B-red)](https://pytorch.org/) [![Docker](https://img.shields.io/badge/docker-ready-blue)](https://www.docker.com/) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 > **Система для автоматизированной классификации и ручной разметки коллизий BIM-моделей с гибкими настройками и экспортом результатов**
 
@@ -141,6 +141,8 @@ ClashMark/
 ├── category_pairs.yaml          # Описание категорий для классификации
 ├── model/                       # Обученные модели и статистика
 │   ├── model_train_log.json     # Лог обучения
+│   ├── model_clashmark.pt       # Пример обученной модели PyTorch
+│   ├── model_clashmark.pt_stats.json # Статистика по модели (метрики, confusion matrix и др.)
 │   └── *.pt                     # Обученные модели PyTorch
 ├── requirements.txt             # Зависимости Python
 └── README.md                    # Документация проекта
