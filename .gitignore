@@ -70,6 +70,7 @@ test_*.zip
 # Файлы кэша
 .cache/
 *.cache
+.image_index_cache/
 
 # Файлы Docker
 .dockerignore
@@ -115,15 +116,6 @@ cv_results_*.xml
 bimstep_results_*.xml
 JournalBimStep.xml
 
-# Файлы изображений (если они большие)
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.bmp
-*.tiff
-*.tif
-
 # Исключения для важных файлов
 !static/logo.png
 !README.md
@@ -131,4 +123,7 @@ JournalBimStep.xml
 !requirements.txt
 !app.py
 !category_pairs.yaml 
-/.image_index_cache
+
+# Разрешаем папку images и изображения .png в ней
+!images/
+!images/*.png
