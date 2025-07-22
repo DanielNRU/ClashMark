@@ -131,3 +131,4 @@ JournalBimStep.xml
 !requirements.txt
 !app.py
 !category_pairs.yaml 
+/.image_index_cache
