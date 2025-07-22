@@ -10,17 +10,20 @@ from core.image_utils import find_image_by_name, get_relative_image_path, get_ab
 logger = logging.getLogger(__name__)
 
 class CollisionImageDataset(Dataset):
+    """
+    Класс-обёртка для работы с изображениями коллизий в формате PyTorch Dataset.
+    Позволяет удобно загружать изображения и метки для обучения и инференса.
+    """
     def __init__(self, dataframe, transform=None, session_dir=None):
         self.dataframe = dataframe.copy()
         self.transform = transform
         self.session_dir = session_dir
-        # Проверяем наличие необходимых колонок
+        # Проверяем, что есть нужные колонки и сопоставляем пути к изображениям
         if 'image_href' in self.dataframe.columns and session_dir:
             def robust_find(href):
-                # Используем оптимизированную функцию поиска
+                # Сначала ищем по оптимизированному пути, если не найдено — ищем по имени
                 path = get_absolute_image_path_optimized(href, session_dir) if href else None
                 if not path:
-                    # Fallback к старому методу
                     path = find_image_by_name(href, session_dir) if href else None
                     if not path:
                         rel_path = get_relative_image_path(href) if href else ''
@@ -29,23 +32,24 @@ class CollisionImageDataset(Dataset):
             self.dataframe['image_file'] = self.dataframe['image_href'].apply(robust_find)
         if 'image_file' not in self.dataframe.columns:
             raise ValueError("Колонка 'image_file' не найдена в DataFrame")
+        # Оставляем только строки с валидными путями к изображениям
         self.dataframe = self.dataframe[
-            self.dataframe['image_file'].notna() & 
+            self.dataframe['image_file'].notna() &
             (self.dataframe['image_file'] != '') &
             self.dataframe['image_file'].astype(str).str.strip() != ''
         ].copy()
-        # Диагностика: если после фильтрации пусто — выбрасываем ошибку
+        # Если после фильтрации не осталось изображений — выбрасываем ошибку
         if len(self.dataframe) == 0:
             raise ValueError(f"Не найдено валидных изображений для обучения!\nВременная папка: {session_dir}")
         logger.info(f"Загружено {len(self.dataframe)} изображений для обучения")
-    
+
     def __len__(self):
         return len(self.dataframe)
-    
+
     def __getitem__(self, idx):
         row = self.dataframe.iloc[idx]
         image_path = row['image_file']
-        # Определяем метку и приводим к float
+        # Определяем метку для обучения/инференса (0 — разрешено, 1 — активно)
         if 'IsResolved' in row and not pd.isna(row['IsResolved']):
             label = row['IsResolved']
         elif 'label' in row and not pd.isna(row['label']):
@@ -59,7 +63,7 @@ class CollisionImageDataset(Dataset):
         except Exception:
             raise ValueError(f"Метка не преобразуется в float: {label} (row: {row})")
         try:
-            # Проверяем существование файла
+            # Проверяем существование файла изображения
             if not os.path.exists(image_path):
                 logger.warning(f"Файл не найден: {image_path}")
                 image = torch.zeros(3, 224, 224)
@@ -73,6 +77,10 @@ class CollisionImageDataset(Dataset):
         return image, torch.tensor(label, dtype=torch.float32)
 
 def create_transforms(is_training=True):
+    """
+    Возвращает пайплайн аугментаций для изображений.
+    Для обучения — с аугментациями, для инференса — только resize и нормализация.
+    """
     if is_training:
         return transforms.Compose([
             transforms.Resize((500, 500)),

@@ -183,15 +183,6 @@ def handle_inference_request():
 
     return render_template('index.html')
 
-def process_inference(xml_files, zip_files, settings):
-    # Здесь будет логика инференса модели
-    # Возвращать результат, логи, ошибки
-    pass
-
-def get_inference_results():
-    # Здесь можно реализовать получение результатов инференса
-    pass
-
 from flask import Blueprint
 main_bp = Blueprint('main_inference', __name__)
 

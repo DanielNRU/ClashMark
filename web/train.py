@@ -295,13 +295,4 @@ def train_progress():
     if not last_train_temp_dir:
         return jsonify({'status': 'not_started'})
     prog = load_train_progress(last_train_temp_dir)
-    return jsonify(prog)
-
-def process_training(xml_files, zip_files, batch_size, epochs):
-    # Здесь будет логика запуска обучения модели
-    # Возвращать результат, логи, ошибки
-    pass
-
-def get_train_logs():
-    # Здесь можно реализовать получение логов обучения для live-обновления
-    pass 
+    return jsonify(prog) 

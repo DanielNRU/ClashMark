@@ -222,7 +222,7 @@ def run_analysis_background(session_id, session_dir, xml_path_name_pairs, zip_pa
                 download_filename = f"{orig_base_name}.xml" # Use original name for download
                 download_url = f"/download/{session_id}/{urllib.parse.quote(os.path.basename(output_xml))}"
                 download_links.append({'name': download_filename, 'url': download_url})
-                # ... (здесь будет логика для stats_per_file и detailed_stats, если нужна) ...
+
             
             # После цикла добавляем ссылку на журнал, если он существует
             if export_format == 'bimstep':
@@ -590,7 +590,7 @@ def analyze_files():
         thread.start()
 
         return jsonify({'success': True, 'session_id': session_id})
-
+        
     except Exception as e:
         logger.error(f"Ошибка при запуске анализа: {e}", exc_info=True)
         return jsonify({'error': f'Ошибка запуска анализа: {str(e)}'})

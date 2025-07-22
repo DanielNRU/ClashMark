@@ -11,6 +11,9 @@ from core.xml_utils import parse_xml_data, load_all_category_pairs, get_pair, ex
 from core.image_utils import find_image_by_name, get_absolute_image_path_optimized
 
 def fill_xml_fields(df):
+    """
+    Заполняет поля DataFrame для экспорта в XML в зависимости от предсказания модели.
+    """
     df_result = df.copy()
     for idx, row in df_result.iterrows():
         prediction = row['cv_prediction']
@@ -28,8 +31,13 @@ def fill_xml_fields(df):
             df_result.at[idx, 'resultstatus'] = 'Проанализировано'
     return df_result
 
-def predict(model, device, df, transform, batch_size=16, confidence_threshold=0.5, low_confidence_threshold=0.3, high_confidence_threshold=0.7, session_dir=None):
-    import torch
+def predict(
+    model, device, df, transform, batch_size=16,
+    confidence_threshold=0.5, low_confidence_threshold=0.3,
+    high_confidence_threshold=0.7, session_dir=None):
+    """
+    Выполняет инференс модели по батчам, возвращает DataFrame с предсказаниями и уверенностями.
+    """
     if isinstance(device, str):
         device = torch.device(device)
     dataset = CollisionImageDataset(df, transform, session_dir=session_dir)
@@ -58,7 +66,7 @@ def predict(model, device, df, transform, batch_size=16, confidence_threshold=0.
     df_result['cv_prediction'] = predictions
     df_result['cv_confidence'] = confidences
     df_result = fill_xml_fields(df_result)
-    # --- Новый блок: добавляем clash_uid, если его нет ---
+    # Добавляем clash_uid, если его нет (для уникальной идентификации коллизии)
     if 'clash_uid' not in df_result.columns and 'element1_id' in df_result.columns and 'element2_id' in df_result.columns:
         def make_uid(row):
             id1 = str(row['element1_id']) if pd.notna(row['element1_id']) else ''
@@ -67,22 +75,21 @@ def predict(model, device, df, transform, batch_size=16, confidence_threshold=0.
         df_result['clash_uid'] = df_result.apply(make_uid, axis=1)
     return df_result
 
-# --- Сбор датасета из XML и изображений ---
 def collect_dataset_from_multiple_files(xml_paths, session_dir=None, export_format='standard'):
+    """
+    Собирает датасет из XML-файлов и сопоставляет изображения для инференса.
+    """
     all_dataframes = []
     for xml_path in xml_paths:
         df = parse_xml_data(xml_path, export_format=export_format)
-        if len(df) == 0:
-            continue
-        if not session_dir:
+        if len(df) == 0 or not session_dir:
             continue
         def robust_find(href):
             if not href:
                 return None
-            # Используем оптимизированную функцию поиска
+            # Сначала ищем по оптимизированному пути, если не найдено — ищем по имени
             path = get_absolute_image_path_optimized(href, session_dir)
             if not path:
-                # Fallback к старому методу
                 path = find_image_by_name(href, session_dir)
             return path
         df['image_file'] = df['image_href'].apply(robust_find)
@@ -91,5 +98,7 @@ def collect_dataset_from_multiple_files(xml_paths, session_dir=None, export_form
     if not all_dataframes:
         return pd.DataFrame()
     combined_df = pd.concat(all_dataframes, ignore_index=True)
-    df_with_images = combined_df[combined_df['image_file'].notna() & combined_df['image_file'].apply(lambda x: x is not None)]
+    df_with_images = combined_df[
+        combined_df['image_file'].notna() & combined_df['image_file'].apply(lambda x: x is not None)
+    ]
     return df_with_images 

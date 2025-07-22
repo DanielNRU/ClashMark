@@ -38,8 +38,11 @@ def unzip_archives(zip_paths, dest_dir):
                 zip_ref.extractall(dest_dir)
 
 def safe_filename_with_cyrillic(filename):
+    """
+    Очищает имя файла, оставляя только латиницу, кириллицу, цифры, точки, пробелы и дефис (дефис в конце диапазона).
+    """
     filename = filename.strip()
-    return re.sub(r'[^\u0000-\u007f\wа-яА-ЯёЁ\.\- ]', '', filename)
+    return re.sub(r'[^\u0000-\u007f\w. \u0430-\u044f\u0410-\u042f\u0451\u0401-]', '', filename)
 
 def load_settings():
     try:
