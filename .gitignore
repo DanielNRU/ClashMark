@@ -127,3 +127,4 @@ JournalBimStep.xml
 # Разрешаем папку images и изображения .png в ней
 !images/
 !images/*.png
+/HF
